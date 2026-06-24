@@ -602,7 +602,8 @@ main {
     .wh-disconnect-link:hover { color:var(--text-secondary); text-decoration:underline; }
     .wh-err { background:rgba(255,107,107,0.08); border:1px solid rgba(255,107,107,0.28); color:#FF8A8A; padding:10px 12px; border-radius:10px; font-size:11.5px; font-family:var(--font-mono); margin-bottom:14px; }
   </style>
-  <div class="whoop-section">
+  <!-- WHOOP card hidden — no WHOOP device. Delete the style="display:none" below to re-enable it. -->
+  <div class="whoop-section" style="display:none">
     <div class="section-title">Whoop</div>
     <div class="whoop-card">
       <div id="whDisc" class="wh-disc">
@@ -883,6 +884,365 @@ main {
       const t = load();
       if (t && t.access) { $('whDisc').style.display = 'none'; $('whConn').style.display = ''; loadData(); }
       else { $('whDisc').style.display = ''; $('whConn').style.display = 'none'; }
+    }
+    render();
+  })();
+  </script>
+
+  <!-- ===== Fitbit (Google Health API) card ===== -->
+  <div class="whoop-section" id="fitbit-section">
+    <div class="section-title">Fitbit</div>
+    <div class="whoop-card">
+      <div id="fbDisc" class="wh-disc">
+        <div class="wh-brand"><span class="wh-brand-mark">F</span><span class="wh-brand-text">FITBIT</span></div>
+        <div class="wh-disc-title">Not connected</div>
+        <div class="wh-disc-sub">Link your Google account to see live sleep, heart rate, HRV and an estimated readiness from your Fitbit Air.</div>
+        <button id="fbConnectBtn" class="wh-connect" type="button">Connect Fitbit</button>
+      </div>
+      <div id="fbConn" style="display:none">
+        <div class="wh-head">
+          <div class="wh-brand"><span class="wh-brand-mark">F</span><span class="wh-brand-text">FITBIT</span><span class="wh-live"><span class="wh-live-dot"></span>live</span></div>
+          <div class="wh-head-right">
+            <span id="fbUpdated" class="wh-updated">&mdash;</span>
+            <button id="fbRefresh" class="wh-refresh" type="button" aria-label="Refresh"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15A9 9 0 1 1 5.64 5.64L23 10"/></svg></button>
+          </div>
+        </div>
+        <div id="fbErr" class="wh-err" style="display:none"></div>
+        <div class="wh-ring-wrap">
+          <svg class="wh-ring" viewBox="0 0 220 220" aria-hidden="true">
+            <circle class="wh-ring-track" cx="110" cy="110" r="96"/>
+            <circle class="wh-ring-fill" cx="110" cy="110" r="96" id="fbRingFill"/>
+          </svg>
+          <div class="wh-ring-center">
+            <div id="fbRecNum" class="wh-ring-num">&mdash;</div>
+            <div class="wh-ring-unit">readiness</div>
+            <div id="fbRecLabel" class="wh-ring-label">&mdash;</div>
+          </div>
+        </div>
+        <div id="fbStages" class="wh-stages" style="display:none">
+          <div class="wh-stages-head"><span class="wh-stages-eye">Sleep stages</span><span class="wh-stages-meta" id="fbStagesMeta">&mdash;</span></div>
+          <div class="wh-stages-bar">
+            <div class="wh-stage wh-stage-rem"   id="fbBarRem"   style="width:0%"></div>
+            <div class="wh-stage wh-stage-deep"  id="fbBarDeep"  style="width:0%"></div>
+            <div class="wh-stage wh-stage-light" id="fbBarLight" style="width:0%"></div>
+            <div class="wh-stage wh-stage-awake" id="fbBarAwake" style="width:0%"></div>
+          </div>
+          <div class="wh-stages-legend">
+            <div class="wh-leg"><span class="wh-leg-dot d-rem"></span>REM<span class="wh-leg-num" id="fbRem">&mdash;</span></div>
+            <div class="wh-leg"><span class="wh-leg-dot d-deep"></span>Deep<span class="wh-leg-num" id="fbDeep">&mdash;</span></div>
+            <div class="wh-leg"><span class="wh-leg-dot d-light"></span>Light<span class="wh-leg-num" id="fbLight">&mdash;</span></div>
+            <div class="wh-leg"><span class="wh-leg-dot d-awake"></span>Awake<span class="wh-leg-num" id="fbAwake">&mdash;</span></div>
+          </div>
+        </div>
+        <div class="wh-stats">
+          <div class="wh-stat"><span class="wh-zone" id="fbZoneSleep"></span><div class="wh-stat-label">Sleep</div><div class="wh-stat-val" id="fbSleep">&mdash;</div><div class="wh-stat-sub" id="fbSleepSub">&mdash;</div></div>
+          <div class="wh-stat"><span class="wh-zone" id="fbZoneSteps"></span><div class="wh-stat-label">Steps</div><div class="wh-stat-val" id="fbSteps">&mdash;</div><div class="wh-stat-sub" id="fbStepsSub">today</div></div>
+          <div class="wh-stat"><span class="wh-zone" id="fbZoneHrv"></span><div class="wh-stat-label">HRV</div><div class="wh-stat-val" id="fbHrv">&mdash;</div><div class="wh-stat-sub">ms</div></div>
+          <div class="wh-stat"><span class="wh-zone" id="fbZoneRhr"></span><div class="wh-stat-label">RHR</div><div class="wh-stat-val" id="fbRhr">&mdash;</div><div class="wh-stat-sub">bpm</div></div>
+        </div>
+        <div id="fbBio" class="wh-bio" style="display:none">
+          <div class="wh-bio-item"><span class="wh-zone" id="fbZoneSkin"></span><span class="wh-bio-label">Skin temp &Delta;</span><span class="wh-bio-val" id="fbSkin">&mdash;</span></div>
+          <div class="wh-bio-item"><span class="wh-zone" id="fbZoneSpo2"></span><span class="wh-bio-label">Blood O&#8322;</span><span class="wh-bio-val" id="fbSpo2">&mdash;</span></div>
+          <div class="wh-bio-item"><span class="wh-zone" id="fbZoneResp"></span><span class="wh-bio-label">Resp rate</span><span class="wh-bio-val" id="fbResp">&mdash;</span></div>
+        </div>
+        <div class="wh-legend">
+          <span class="wh-leg-item"><span class="wh-zone z-good"></span>Good</span>
+          <span class="wh-leg-item"><span class="wh-zone z-norm"></span>Normal</span>
+          <span class="wh-leg-item"><span class="wh-zone z-warn"></span>Watch</span>
+          <span class="wh-leg-item"><span class="wh-zone z-bad"></span>High / Low</span>
+        </div>
+        <div id="fbVerdict" class="wh-verdict" style="display:none">
+          <div class="wh-verdict-head"><span class="wh-verdict-eye">Today's call</span><span id="fbVerdictBadge" class="wh-verdict-badge"></span></div>
+          <div id="fbVerdictHead" class="wh-verdict-headline"></div>
+          <div id="fbVerdictReasons" class="wh-verdict-reasons"></div>
+        </div>
+        <div class="wh-disc-sub" style="text-align:center; margin:14px auto 0; max-width:340px;">Readiness is an estimate from your HRV, resting heart rate &amp; sleep &mdash; not an official Fitbit score.</div>
+        <button id="fbDisconnectBtn" class="wh-disconnect-link" type="button">Disconnect</button>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function () {
+    const KEY = 'fitbit_tokens_v1';
+    // Your Google OAuth 2.0 Web client ID (public — safe to ship in the page).
+    // Paste the Client ID from the Google Cloud console between the quotes:
+    const CLIENT_ID = (window.GOOGLE_CLIENT_ID) || 'YOUR_GOOGLE_OAUTH_CLIENT_ID';
+    const REDIRECT  = window.location.origin + '/api/google-callback';
+    // Restricted Google Health scopes — these must ALSO be added on the
+    // OAuth consent screen's "Data Access" page in the Google Cloud console.
+    const SCOPES = [
+      'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
+      'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
+      'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly'
+    ].join(' ');
+    const DEBUG = true; // logs raw Google Health responses to the browser console
+
+    const $ = (id) => document.getElementById(id);
+    const errEl = () => $('fbErr');
+    function showErr(m) { const e = errEl(); if (!e) return; e.textContent = m || ''; e.style.display = m ? 'block' : 'none'; }
+
+    function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } }
+    function save(t) { try { localStorage.setItem(KEY, JSON.stringify(t)); } catch {} }
+    function wipe() { try { localStorage.removeItem(KEY); } catch {} }
+
+    // Capture tokens handed back by /api/google-callback in the URL hash.
+    if (location.hash && location.hash.indexOf('g_access') !== -1) {
+      const h = new URLSearchParams(location.hash.slice(1));
+      const access = h.get('g_access'), refresh = h.get('g_refresh');
+      const expires = Number(h.get('g_expires')) || Date.now() + 3500e3;
+      if (access) { save({ access, refresh, expires }); history.replaceState(null, '', location.pathname + location.search); }
+    }
+
+    $('fbConnectBtn').addEventListener('click', () => {
+      if (CLIENT_ID === 'YOUR_GOOGLE_OAUTH_CLIENT_ID') {
+        alert('Add your Google OAuth Client ID in health.html (CLIENT_ID) before connecting.');
+        return;
+      }
+      const url = 'https://accounts.google.com/o/oauth2/v2/auth'
+        + '?client_id='     + encodeURIComponent(CLIENT_ID)
+        + '&redirect_uri='  + encodeURIComponent(REDIRECT)
+        + '&response_type=code'
+        + '&scope='         + encodeURIComponent(SCOPES)
+        + '&access_type=offline'
+        + '&prompt=consent'
+        + '&include_granted_scopes=false'
+        + '&state='         + Math.random().toString(36).slice(2);
+      location.href = url;
+    });
+    $('fbDisconnectBtn').addEventListener('click', () => { wipe(); render(); });
+    $('fbRefresh').addEventListener('click', async (e) => {
+      const btn = e.currentTarget; btn.classList.add('spin');
+      try { await loadData(); } finally { setTimeout(() => btn.classList.remove('spin'), 600); }
+    });
+
+    async function refreshTok(t) {
+      if (!t.refresh) return null;
+      try {
+        const r = await fetch('/api/google-refresh', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ refresh_token: t.refresh }) });
+        const j = await r.json();
+        if (j.access_token) { const next = { access: j.access_token, refresh: t.refresh, expires: Date.now() + (j.expires_in||3500)*1000 }; save(next); return next; }
+      } catch {}
+      return null;
+    }
+
+    // Proxy a Google Health dataPoints query. On a filter error (the
+    // field path can vary by dataType on this new API) it retries with
+    // no filter so we still get the latest points.
+    async function gFetch(type, filter, t, pageSize) {
+      const params = new URLSearchParams(); params.set('type', type);
+      if (filter) params.set('filter', filter);
+      params.set('pageSize', String(pageSize || 50));
+      const r = await fetch('/api/google-data?' + params.toString(), { headers: { 'Authorization': 'Bearer ' + t.access, 'Accept':'application/json' } });
+      if (r.status === 401) { const n = await refreshTok(t); if (n) return gFetch(type, filter, n, pageSize); throw new Error('unauthorized — reconnect Fitbit'); }
+      const body = await r.text();
+      let json = null; try { json = JSON.parse(body); } catch {}
+      if (!r.ok) {
+        if (filter) { if (DEBUG) console.warn('[fitbit] ' + type + ' filter rejected, retrying unfiltered:', body); return gFetch(type, null, t, pageSize); }
+        throw new Error(type + ' ' + r.status + ': ' + body);
+      }
+      if (DEBUG) console.log('[fitbit] ' + type, json);
+      return (json && json.dataPoints) || [];
+    }
+
+    // ---- generic, schema-tolerant extractors ----
+    function findNum(obj, re) {
+      let found = null;
+      (function walk(o) {
+        if (found != null || o == null) return;
+        if (Array.isArray(o)) { for (const x of o) { walk(x); if (found != null) return; } return; }
+        if (typeof o === 'object') {
+          for (const [k, v] of Object.entries(o)) {
+            if (found != null) return;
+            if (re.test(k)) {
+              if (typeof v === 'number') { found = v; return; }
+              if (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v))) { found = Number(v); return; }
+            }
+            walk(v);
+          }
+        }
+      })(obj);
+      return found;
+    }
+    function findTime(obj) {
+      let best = null;
+      (function walk(o) {
+        if (o == null) return;
+        if (Array.isArray(o)) { o.forEach(walk); return; }
+        if (typeof o === 'object') {
+          for (const [k, v] of Object.entries(o)) {
+            if (typeof v === 'string' && /time/i.test(k)) { const ms = Date.parse(v); if (!isNaN(ms) && (best == null || ms > best)) best = ms; }
+            else walk(v);
+          }
+        }
+      })(obj);
+      return best;
+    }
+    function series(dps, re) {
+      return dps.map(dp => ({ t: findTime(dp), v: findNum(dp, re) })).filter(x => x.v != null).sort((a, b) => (a.t || 0) - (b.t || 0));
+    }
+    function median(arr) { if (!arr.length) return null; const s = [...arr].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    function pTime(o, which) { if (!o || typeof o !== 'object') return null; for (const [k, v] of Object.entries(o)) { if (typeof v === 'string' && new RegExp(which, 'i').test(k) && /time/i.test(k)) { const ms = Date.parse(v); if (!isNaN(ms)) return ms; } } return null; }
+    function pushStage(arr, st) {
+      if (!st || typeof st !== 'object') return;
+      const iv = st.interval || st;
+      const start = pTime(iv, 'start') || pTime(st, 'start');
+      const end   = pTime(iv, 'end')   || pTime(st, 'end');
+      let ms = null;
+      if (start && end) ms = end - start;
+      if (ms == null) { const d = findNum(st, /durationMillis|millis/i); if (d != null) ms = d; }
+      if (ms == null) { const sec = findNum(st, /durationSeconds|seconds/i); if (sec != null) ms = sec * 1000; }
+      if (ms == null || ms <= 0) return;
+      const blob = JSON.stringify(st).toLowerCase();
+      let bucket = 'light';
+      if (/rem/.test(blob)) bucket = 'rem';
+      else if (/deep|slow_wave|slowwave/.test(blob)) bucket = 'deep';
+      else if (/awake|wake/.test(blob)) bucket = 'awake';
+      arr.push({ start, end, ms, bucket });
+    }
+    function parseSleep(dps) {
+      if (!dps || !dps.length) return null;
+      const stages = [];
+      for (const dp of dps) {
+        const sObj = dp.sleep || dp;
+        if (sObj && Array.isArray(sObj.stages)) { for (const st of sObj.stages) pushStage(stages, st); }
+        else pushStage(stages, sObj);
+      }
+      if (!stages.length) return null;
+      const latest = Math.max.apply(null, stages.map(s => s.end || 0));
+      const cutoff = latest - 14 * 3600e3; // keep the most recent night only
+      const recent = stages.filter(s => (s.end || 0) >= cutoff);
+      const tot = { rem: 0, deep: 0, light: 0, awake: 0 };
+      for (const s of recent) tot[s.bucket] += s.ms;
+      tot.total = tot.rem + tot.deep + tot.light + tot.awake;
+      return tot.total > 0 ? tot : null;
+    }
+
+    function readiness(hrvS, rhrS, sleepHours) {
+      const comps = [], weights = [];
+      if (hrvS.length >= 2) { const today = hrvS[hrvS.length - 1].v; const base = median(hrvS.slice(0, -1).map(x => x.v)); if (base) { comps.push(clamp((today / base - 0.6) / 0.8 * 100, 0, 100)); weights.push(0.5); } }
+      if (rhrS.length >= 2) { const today = rhrS[rhrS.length - 1].v; const base = median(rhrS.slice(0, -1).map(x => x.v)); if (base) { comps.push(clamp((base / today - 0.85) / 0.30 * 100, 0, 100)); weights.push(0.3); } }
+      if (sleepHours != null) { comps.push(clamp(sleepHours / 8, 0, 1) * 100); weights.push(0.2); }
+      if (!comps.length) return null;
+      const wsum = weights.reduce((a, b) => a + b, 0);
+      return Math.round(comps.reduce((a, c, i) => a + c * weights[i], 0) / wsum);
+    }
+
+    function fmtMins(ms) { const m = Math.round(ms / 60000); const h = Math.floor(m / 60); return h + 'h ' + String(m % 60).padStart(2, '0') + 'm'; }
+    function fmtMinsShort(ms) { const m = Math.round(ms / 60000); const h = Math.floor(m / 60); return (h > 0 ? h + 'h ' : '') + (m % 60) + 'm'; }
+    function zone(el, c) { if (!el) return; el.className = 'wh-zone'; if (c) el.classList.add('z-' + c); }
+    function hrvZone(h) { if (h == null) return null; if (h >= 60) return 'good'; if (h >= 40) return 'norm'; return 'warn'; }
+    function rhrZone(r) { if (r == null) return null; if (r <= 55) return 'good'; if (r <= 70) return 'norm'; return 'warn'; }
+    function spo2Zone(s) { if (s == null) return null; if (s >= 95) return 'good'; if (s >= 92) return 'norm'; if (s >= 88) return 'warn'; return 'bad'; }
+    function respZone(r) { if (r == null) return null; if (r >= 12 && r <= 18) return 'good'; if (r >= 10 && r <= 22) return 'norm'; return 'warn'; }
+    function sleepHoursZone(h) { if (h == null) return null; if (h >= 7.5) return 'good'; if (h >= 6.5) return 'norm'; if (h >= 5) return 'warn'; return 'bad'; }
+    function stepsZone(s) { if (s == null) return null; if (s >= 10000) return 'good'; if (s >= 7000) return 'norm'; if (s >= 4000) return 'warn'; return 'bad'; }
+    function ringStroke(s) { if (s >= 67) return '#6BE3A4'; if (s >= 34) return '#F2C063'; return '#FF8A8A'; }
+    function recoveryLabel(s) { if (s >= 67) return 'Go hard today'; if (s >= 34) return 'Moderate — listen to body'; return 'Recover today'; }
+    function verdict(rec) {
+      if (rec == null) return null;
+      let cls = 'green', badge = 'GREEN', headline = "Push hard today. Readiness is high — go for the harder session or the heavy task.";
+      if (rec < 67 && rec >= 34) { cls = 'yellow'; badge = 'YELLOW'; headline = "Moderate day. Train but hold something back — planned volume, skip the maximal efforts."; }
+      else if (rec < 34) { cls = 'red'; badge = 'RED'; headline = "Recover. Your body is asking for rest — easy movement, mobility, eat and sleep well."; }
+      return { cls, badge, headline };
+    }
+
+    function renderRing(rec) {
+      const fill = $('fbRingFill'); const C = 603.19;
+      if (rec != null) {
+        fill.style.strokeDashoffset = String(C * (1 - rec / 100));
+        fill.style.stroke = ringStroke(rec);
+        $('fbRecNum').textContent = String(rec);
+        const l = $('fbRecLabel'); l.textContent = recoveryLabel(rec); l.style.color = ringStroke(rec);
+      } else {
+        $('fbRecNum').textContent = '—';
+        $('fbRecLabel').textContent = 'building baseline';
+      }
+    }
+    function renderStages(s) {
+      const total = s.total; if (!(total > 0)) return;
+      $('fbStages').style.display = '';
+      $('fbBarRem').style.width   = (100 * s.rem / total) + '%';
+      $('fbBarDeep').style.width  = (100 * s.deep / total) + '%';
+      $('fbBarLight').style.width = (100 * s.light / total) + '%';
+      $('fbBarAwake').style.width = (100 * s.awake / total) + '%';
+      $('fbStagesMeta').textContent = fmtMins(total) + ' total';
+      $('fbRem').textContent   = fmtMinsShort(s.rem);
+      $('fbDeep').textContent  = fmtMinsShort(s.deep);
+      $('fbLight').textContent = fmtMinsShort(s.light);
+      $('fbAwake').textContent = fmtMinsShort(s.awake);
+    }
+
+    async function loadData() {
+      let t = load(); if (!t) return;
+      if (t.expires && Date.now() > t.expires - 60000) { const n = await refreshTok(t); if (n) t = n; }
+      showErr('');
+      try {
+        const days = (n) => new Date(Date.now() - n * 864e5).toISOString();
+        const [hrvDps, rhrDps, spo2Dps, respDps, tempDps, stepsDps, sleepDps] = await Promise.all([
+          gFetch('heart-rate-variability',            'heart_rate_variability.interval.start_time >= "' + days(30) + '"', t, 200).catch(e => { console.error('[fitbit] hrv', e.message); return []; }),
+          gFetch('daily-resting-heart-rate',          'daily_resting_heart_rate.interval.start_time >= "' + days(30) + '"', t, 200).catch(e => { console.error('[fitbit] rhr', e.message); return []; }),
+          gFetch('oxygen-saturation',                 'oxygen_saturation.interval.start_time >= "' + days(2) + '"', t, 200).catch(e => { console.error('[fitbit] spo2', e.message); return []; }),
+          gFetch('daily-respiratory-rate',            'daily_respiratory_rate.interval.start_time >= "' + days(3) + '"', t, 50).catch(e => { console.error('[fitbit] resp', e.message); return []; }),
+          gFetch('daily-sleep-temperature-derivations','daily_sleep_temperature_derivations.interval.start_time >= "' + days(7) + '"', t, 50).catch(e => { console.error('[fitbit] temp', e.message); return []; }),
+          gFetch('steps',                             'steps.interval.start_time >= "' + days(1) + '"', t, 500).catch(e => { console.error('[fitbit] steps', e.message); return []; }),
+          gFetch('sleep',                             'sleep.interval.end_time >= "' + days(2) + '"', t, 200).catch(e => { console.error('[fitbit] sleep', e.message); return []; })
+        ]);
+
+        const hrvS = series(hrvDps, /rmssd/i);
+        const rhrS = series(rhrDps, /beatsPerMinute|restingHeartRate|bpm/i);
+        const hrv = hrvS.length ? Math.round(hrvS[hrvS.length - 1].v) : null;
+        const rhr = rhrS.length ? Math.round(rhrS[rhrS.length - 1].v) : null;
+        const spo2S = series(spo2Dps, /percentage|saturation/i); const spo2 = spo2S.length ? spo2S[spo2S.length - 1].v : null;
+        const respS = series(respDps, /breathsPerMinute|respirat/i); const resp = respS.length ? respS[respS.length - 1].v : null;
+        const tempS = series(tempDps, /celsius|stddev|temperature/i); const skin = tempS.length ? tempS[tempS.length - 1].v : null;
+
+        const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+        let steps = null;
+        if (stepsDps.length) { steps = 0; for (const dp of stepsDps) { const tt = findTime(dp); if (tt == null || tt >= todayStart.getTime()) { const c = findNum(dp, /count|steps/i); if (c != null) steps += c; } } }
+
+        let stg = null; try { stg = parseSleep(sleepDps); } catch (e) { console.error('[fitbit] sleep parse', e); }
+        let sleepHours = null;
+        if (stg && stg.total > 0) { sleepHours = (stg.rem + stg.deep + stg.light) / 3.6e6; renderStages(stg); }
+
+        renderRing(readiness(hrvS, rhrS, sleepHours));
+
+        if (sleepHours != null) { $('fbSleep').textContent = sleepHours.toFixed(1) + 'h'; $('fbSleepSub').textContent = 'last night'; zone($('fbZoneSleep'), sleepHoursZone(sleepHours)); }
+        if (steps != null) { $('fbSteps').textContent = steps >= 1000 ? (steps / 1000).toFixed(steps >= 10000 ? 0 : 1) + 'k' : String(steps); zone($('fbZoneSteps'), stepsZone(steps)); }
+        if (hrv != null) { $('fbHrv').textContent = String(hrv); zone($('fbZoneHrv'), hrvZone(hrv)); }
+        if (rhr != null) { $('fbRhr').textContent = String(rhr); zone($('fbZoneRhr'), rhrZone(rhr)); }
+
+        const anyBio = (skin != null) || (spo2 != null) || (resp != null);
+        if (anyBio) {
+          $('fbBio').style.display = '';
+          if (skin != null) $('fbSkin').textContent = (skin > 0 ? '+' : '') + Number(skin).toFixed(2) + '°C';
+          if (spo2 != null) { $('fbSpo2').textContent = Number(spo2).toFixed(0) + '%'; zone($('fbZoneSpo2'), spo2Zone(spo2)); }
+          if (resp != null) { $('fbResp').textContent = Number(resp).toFixed(1) + ' br/min'; zone($('fbZoneResp'), respZone(Number(resp))); }
+        }
+
+        const rec = readiness(hrvS, rhrS, sleepHours);
+        const v = verdict(rec);
+        if (v) {
+          $('fbVerdict').style.display = '';
+          const b = $('fbVerdictBadge'); b.textContent = v.badge; b.className = 'wh-verdict-badge ' + v.cls;
+          $('fbVerdictHead').textContent = v.headline;
+          const reasons = [];
+          if (sleepHours != null) reasons.push((sleepHours >= 7 ? '✓' : '·') + ' Slept ' + sleepHours.toFixed(1) + 'h — ' + (sleepHours >= 7 ? 'solid recovery window.' : 'short sleep.'));
+          if (hrv != null && hrvS.length >= 2) { const base = median(hrvS.slice(0, -1).map(x => x.v)); reasons.push((base && hrv >= base ? '✓' : '·') + ' HRV ' + hrv + 'ms — ' + (base ? (hrv >= base ? 'at/above your baseline.' : 'below your baseline.') : 'tracking.')); }
+          if (rhr != null && rhrS.length >= 2) { const base = median(rhrS.slice(0, -1).map(x => x.v)); reasons.push((base && rhr <= base ? '✓' : '·') + ' RHR ' + rhr + 'bpm — ' + (base ? (rhr <= base ? 'at/below baseline.' : 'elevated vs baseline.') : 'tracking.')); }
+          if (steps != null) reasons.push((steps >= 8000 ? '✓' : '·') + ' ' + steps.toLocaleString() + ' steps today.');
+          $('fbVerdictReasons').innerHTML = reasons.join('<br>');
+        }
+
+        $('fbUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+      } catch (e) { showErr(e.message || String(e)); }
+    }
+
+    function render() {
+      const t = load();
+      if (t && t.access) { $('fbDisc').style.display = 'none'; $('fbConn').style.display = ''; loadData(); }
+      else { $('fbDisc').style.display = ''; $('fbConn').style.display = 'none'; }
     }
     render();
   })();
