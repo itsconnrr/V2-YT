@@ -970,7 +970,9 @@ main {
     const SCOPES = [
       'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
       'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
-      'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly'
+      'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly',
+      'https://www.googleapis.com/auth/spreadsheets',
+      'https://www.googleapis.com/auth/calendar.events'
     ].join(' ');
     const DEBUG = true; // logs raw Google Health responses to the browser console
     const DEBUG_PANEL = /fbdebug/i.test(location.hash) || /fbdebug/i.test(location.search); // on-screen raw dump for tuning

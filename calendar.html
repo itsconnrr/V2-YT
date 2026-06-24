@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script src="lock.js"></script>
+<script src="/api/config"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#050506">
+<title>Calendar · Connor's Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="google-api.js" defer></script>
+<script src="topbar.js" defer></script>
+<style>
+:root{--text-primary:#FAFAFA;--text-secondary:#B8B6B0;--text-tertiary:#76746E;--accent:#A78BFA;--font:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,Helvetica,Arial,sans-serif;--font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#050506;color:var(--text-secondary);font-family:var(--font);-webkit-font-smoothing:antialiased}
+body{min-height:100vh;padding:max(24px,env(safe-area-inset-top)) 18px 90px}
+.page{max-width:680px;margin:0 auto}
+.dash-title{margin:0 0 2px;font-size:26px;font-weight:700;letter-spacing:-0.025em;background:linear-gradient(180deg,#FFF,#C7C4BC);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.sub{font-size:13px;color:var(--text-tertiary);margin:0 0 18px}
+.gate{text-align:center;padding:48px 20px;color:var(--text-tertiary);font-size:14px;line-height:1.6}
+.gate a{color:var(--accent);text-decoration:none;font-weight:700}
+.add-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:16px;padding:12px;margin-bottom:18px}
+.add-row{display:flex;gap:8px;flex-wrap:wrap}
+.c-title{flex:1;min-width:160px;padding:13px;border:1px solid rgba(255,255,255,0.1);border-radius:11px;background:rgba(0,0,0,0.3);color:var(--text-primary);font-size:15px;outline:none;font-family:inherit}
+.c-title:focus{border-color:rgba(255,255,255,0.3)}
+.c-when{padding:12px;border:1px solid rgba(255,255,255,0.1);border-radius:11px;background:rgba(0,0,0,0.3);color:var(--text-primary);font-size:14px;font-family:inherit}
+.c-dur{padding:12px;border:1px solid rgba(255,255,255,0.1);border-radius:11px;background:rgba(0,0,0,0.3);color:var(--text-primary);font-size:14px;font-family:inherit}
+.c-add{padding:13px 18px;border:0;border-radius:11px;background:linear-gradient(180deg,#FFF,#E8E5DD);color:#0A0A0B;font-weight:700;font-family:inherit;font-size:15px;cursor:pointer}
+.status{text-align:center;font-size:12px;color:var(--text-secondary);min-height:16px;margin:6px 0}
+.day-head{font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-tertiary);margin:18px 0 8px}
+.evt{display:flex;gap:12px;align-items:baseline;padding:11px 14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-left:2px solid var(--accent);border-radius:10px;margin-bottom:8px}
+.evt-time{font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);min-width:74px;white-space:nowrap}
+.evt-title{font-size:15px;color:var(--text-primary);font-weight:600}
+.empty{color:var(--text-tertiary);font-size:14px;text-align:center;padding:24px}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1 class="dash-title">Calendar</h1>
+  <p class="sub">Synced with Google &amp; Apple Calendar</p>
+
+  <div id="gate" class="gate" style="display:none">
+    Connect your Google account on the <a href="health.html">Health page</a> first to see and add events.
+  </div>
+
+  <div id="main" style="display:none">
+    <div class="add-card">
+      <div class="add-row">
+        <input class="c-title" id="evtTitle" type="text" placeholder="Add an event…" autocomplete="off">
+        <input class="c-when" id="evtWhen" type="datetime-local">
+        <select class="c-dur" id="evtDur">
+          <option value="15">15 min</option>
+          <option value="30">30 min</option>
+          <option value="60" selected>1 hour</option>
+          <option value="90">1.5 hrs</option>
+          <option value="120">2 hrs</option>
+        </select>
+        <button class="c-add" id="addBtn" type="button">+ Add</button>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+    <div id="events"><div class="empty">Loading…</div></div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const CAL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function localInput(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function setStatus(m) { $('status').textContent = m || ''; }
+  function escapeHtml(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  function scopeErr(e) { return /403|insufficient|scope|PERMISSION_DENIED/i.test((e && e.message) || ''); }
+
+  function gate() {
+    const ok = window.GoogleAPI && GoogleAPI.isConnected();
+    $('gate').style.display = ok ? 'none' : 'block';
+    $('main').style.display = ok ? 'block' : 'none';
+    return ok;
+  }
+
+  async function loadEvents() {
+    const box = $('events');
+    try {
+      const timeMin = new Date().toISOString();
+      const timeMax = new Date(Date.now() + 14 * 864e5).toISOString();
+      const url = CAL + '?singleEvents=true&orderBy=startTime&maxResults=50'
+        + '&timeMin=' + encodeURIComponent(timeMin) + '&timeMax=' + encodeURIComponent(timeMax);
+      const r = await GoogleAPI.gfetch(url, {});
+      if (!r.ok) {
+        box.innerHTML = '<div class="empty">' + (r.status === 403
+          ? 'Reconnect on the Health page to grant Calendar access.'
+          : 'Could not load events (' + r.status + ').') + '</div>';
+        return;
+      }
+      const j = await r.json();
+      render(j.items || []);
+    } catch (e) {
+      box.innerHTML = '<div class="empty">' + (e.message === 'not connected' ? 'Not connected.' : 'Error: ' + e.message) + '</div>';
+    }
+  }
+
+  function render(items) {
+    const box = $('events');
+    if (!items.length) { box.innerHTML = '<div class="empty">Nothing in the next two weeks. 🎉</div>'; return; }
+    let html = '', lastDay = '';
+    items.forEach(ev => {
+      const isAllDay = !!(ev.start && ev.start.date && !ev.start.dateTime);
+      const start = new Date((ev.start && (ev.start.dateTime || ev.start.date)) || Date.now());
+      const dayKey = start.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+      if (dayKey !== lastDay) { html += '<div class="day-head">' + dayKey + '</div>'; lastDay = dayKey; }
+      const time = isAllDay ? 'All day' : start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+      html += '<div class="evt"><span class="evt-time">' + time + '</span><span class="evt-title">' + escapeHtml(ev.summary || '(no title)') + '</span></div>';
+    });
+    box.innerHTML = html;
+  }
+
+  async function add() {
+    const title = ($('evtTitle').value || '').trim();
+    const whenVal = $('evtWhen').value;
+    if (!title) { $('evtTitle').focus(); return; }
+    if (!whenVal) { $('evtWhen').focus(); return; }
+    const start = new Date(whenVal);
+    const dur = parseInt($('evtDur').value, 10) || 60;
+    const end = new Date(start.getTime() + dur * 60000);
+    const btn = $('addBtn'); btn.disabled = true;
+    try {
+      setStatus('Adding…');
+      const body = { summary: title, start: { dateTime: start.toISOString(), timeZone: TZ }, end: { dateTime: end.toISOString(), timeZone: TZ } };
+      const r = await GoogleAPI.gfetch(CAL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) { setStatus(r.status === 403 ? 'Reconnect on the Health page to grant Calendar access.' : 'Add failed (' + r.status + ').'); return; }
+      setStatus('Added ✓'); $('evtTitle').value = '';
+      await loadEvents();
+      setTimeout(() => setStatus(''), 1500);
+    } catch (e) {
+      setStatus(scopeErr(e) ? 'Reconnect on the Health page to grant Calendar access.' : 'Error: ' + e.message);
+    } finally { btn.disabled = false; }
+  }
+
+  // default the picker to the next hour, on the hour
+  const def = new Date(); def.setHours(def.getHours() + 1, 0, 0, 0); $('evtWhen').value = localInput(def);
+  $('addBtn').addEventListener('click', add);
+  $('evtTitle').addEventListener('keydown', e => { if (e.key === 'Enter') add(); });
+
+  if (gate()) loadEvents();
+});
+</script>
+</body>
+</html>
