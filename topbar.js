@@ -236,7 +236,9 @@ body.topbar-modal-open {
     try { return window.self !== window.top; } catch (e) { return true; }
   }
   function shouldShowChrome() {
-    return !isFinancePage() && !isEmbedded();
+    // Single-page dashboard: no bottom tabs / water pill anymore. Keep
+    // topbar.js loaded only for its mobile gesture + modal-scroll lockdown.
+    return false;
   }
   function currentPageKey() {
     const p = (window.location.pathname || '').toLowerCase();

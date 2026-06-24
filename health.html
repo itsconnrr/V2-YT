@@ -7,10 +7,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#050506">
 <meta name="color-scheme" content="dark">
-<title>Daily Stack — Customizable Template</title>
+<title>Connor's Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="sync.js" defer></script>
 <script src="topbar.js" defer></script>
+<script src="google-api.js" defer></script>
+<script src="sheets.js" defer></script>
 <style>
 :root {
   --bg: #050506;
@@ -601,6 +603,27 @@ main {
     .wh-disconnect-link { display:block; margin:16px auto 0; padding:6px 14px; background:transparent; border:none; color:var(--text-tertiary); font-family:inherit; font-size:11px; text-align:center; cursor:pointer; letter-spacing:0.04em; }
     .wh-disconnect-link:hover { color:var(--text-secondary); text-decoration:underline; }
     .wh-err { background:rgba(255,107,107,0.08); border:1px solid rgba(255,107,107,0.28); color:#FF8A8A; padding:10px 12px; border-radius:10px; font-size:11.5px; font-family:var(--font-mono); margin-bottom:14px; }
+    /* Dual rings: readiness + day-left */
+    .fb-rings { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:20px; margin:6px auto 16px; }
+    .fb-rings .wh-ring-wrap { width:150px; margin:0; max-width:none; }
+    .fb-rings .wh-ring-num { font-size:40px; }
+    .fb-rings .wh-ring-unit { margin-top:6px; }
+    .day-ring { position:relative; width:150px; height:150px; flex-shrink:0; }
+    .day-ring svg { width:100%; height:100%; display:block; }
+    .day-ring-track { fill:none; stroke:rgba(255,255,255,0.06); stroke-width:8; }
+    .day-ring-fill { fill:none; stroke-width:8; stroke-linecap:round; transform:rotate(-90deg); transform-origin:60px 60px; transition:stroke 0.7s cubic-bezier(0.22,1,0.36,1), stroke-dashoffset 0.7s cubic-bezier(0.22,1,0.36,1); }
+    .day-ring-overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; }
+    .day-ring-percent { font-size:34px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-0.04em; color:var(--text-primary); line-height:1; }
+    .day-ring-phase { margin-top:6px; font-size:9px; font-weight:800; letter-spacing:0.18em; text-transform:uppercase; color:var(--text-tertiary); font-family:var(--font-mono); }
+    .day-ring-clock { font-family:var(--font-mono); font-size:10px; color:var(--text-tertiary); margin-top:3px; }
+    .day-ring-text { text-align:center; margin:0 auto 4px; }
+    .day-ring-status { font-size:14px; font-weight:700; color:var(--text-primary); }
+    .day-ring-remaining { font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); margin-top:3px; }
+    .day-ring-hours { font-family:var(--font-mono); font-size:10.5px; color:var(--text-tertiary); margin-top:2px; }
+    /* Links to the other pages */
+    .dash-links { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin:26px 0 6px; }
+    .dash-link { display:inline-flex; align-items:center; gap:6px; padding:11px 18px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.04); color:var(--text-secondary); text-decoration:none; font-size:13px; font-weight:600; }
+    .dash-link:hover { background:rgba(255,255,255,0.08); color:var(--text-primary); }
   </style>
   <!-- WHOOP card hidden — no WHOOP device. Delete the style="display:none" below to re-enable it. -->
   <div class="whoop-section" style="display:none">
@@ -908,16 +931,40 @@ main {
           </div>
         </div>
         <div id="fbErr" class="wh-err" style="display:none"></div>
-        <div class="wh-ring-wrap">
-          <svg class="wh-ring" viewBox="0 0 220 220" aria-hidden="true">
-            <circle class="wh-ring-track" cx="110" cy="110" r="96"/>
-            <circle class="wh-ring-fill" cx="110" cy="110" r="96" id="fbRingFill"/>
-          </svg>
-          <div class="wh-ring-center">
-            <div id="fbRecNum" class="wh-ring-num">&mdash;</div>
-            <div class="wh-ring-unit">readiness</div>
-            <div id="fbRecLabel" class="wh-ring-label">&mdash;</div>
+        <div class="fb-rings">
+          <div class="wh-ring-wrap">
+            <svg class="wh-ring" viewBox="0 0 220 220" aria-hidden="true">
+              <circle class="wh-ring-track" cx="110" cy="110" r="96"/>
+              <circle class="wh-ring-fill" cx="110" cy="110" r="96" id="fbRingFill"/>
+            </svg>
+            <div class="wh-ring-center">
+              <div id="fbRecNum" class="wh-ring-num">&mdash;</div>
+              <div class="wh-ring-unit">readiness</div>
+              <div id="fbRecLabel" class="wh-ring-label">&mdash;</div>
+            </div>
           </div>
+          <div class="day-ring">
+            <svg viewBox="0 0 120 120">
+              <defs>
+                <filter id="dayRingGlow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="2.4" result="b"/>
+                  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+              </defs>
+              <circle class="day-ring-track" cx="60" cy="60" r="52"/>
+              <circle class="day-ring-fill" cx="60" cy="60" r="52" id="dayRingFill" filter="url(#dayRingGlow)"/>
+            </svg>
+            <div class="day-ring-overlay">
+              <div class="day-ring-percent" id="dayRingPercent">&mdash;</div>
+              <div class="day-ring-phase" id="dayRingPhase">DAY LEFT</div>
+              <div class="day-ring-clock" id="dayRingClock">&mdash;</div>
+            </div>
+          </div>
+        </div>
+        <div class="day-ring-text">
+          <div class="day-ring-status" id="dayRingStatus">&mdash;</div>
+          <div class="day-ring-remaining" id="dayRingRemaining">&mdash;</div>
+          <div class="day-ring-hours">9:00 AM &ndash; 12:00 AM</div>
         </div>
         <div id="fbStages" class="wh-stages" style="display:none">
           <div class="wh-stages-head"><span class="wh-stages-eye">Sleep stages</span><span class="wh-stages-meta" id="fbStagesMeta">&mdash;</span></div>
@@ -1324,13 +1371,361 @@ main {
   </div>
   </div><!-- /Daily Stack hidden -->
 
-  <section id="water" class="water-embed">
-    <div class="section-title">Water Tracker</div>
-    <iframe src="po-water.html" class="water-iframe" loading="lazy" title="Water Tracker"></iframe>
-  </section>
+  <style>
+  :root { --success:#6BE3A4; --warning:#F2C063; --danger:#FF6B6B; }
+  .gm-section { margin-top: 26px; }
+  .ticker-row { display:grid; grid-template-columns:1fr; gap:4px; margin-bottom:14px; }
+  .goal-ticker { position:relative; overflow:hidden; display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:12px; background:linear-gradient(180deg, rgba(0,0,0,0.42), rgba(0,0,0,0.30)); box-shadow:inset 0 1px 0 rgba(255,255,255,0.04); }
+  .goal-ticker-led-dot { width:7px; height:7px; border-radius:50%; background:#6BE3A4; box-shadow:0 0 8px rgba(107,227,164,0.7); animation:led-pulse 1.6s ease-in-out infinite; display:inline-block; }
+  @keyframes led-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.45;transform:scale(0.85)} }
+  .goal-ticker-label { font-family:var(--font-mono); font-size:9.5px; font-weight:800; letter-spacing:0.18em; color:var(--text-tertiary); }
+  .goal-ticker-stage { position:relative; overflow:hidden; flex:1; height:22px; }
+  .goal-ticker-row { position:absolute; inset:0; display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:12.5px; font-weight:600; color:var(--text-primary); white-space:nowrap; opacity:1; transition:opacity 0.22s ease; }
+  .goal-ticker-row.is-fading { opacity:0; }
+  .goal-ticker-status { display:inline-flex; justify-content:center; width:18px; color:var(--text-tertiary); }
+  .goal-ticker-status[data-status="done"] { color:var(--success); }
+  .goal-ticker-text { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .goal-ticker-meta { font-family:var(--font-mono); font-size:11px; font-weight:700; color:var(--text-secondary); padding:3px 8px; border-radius:999px; background:rgba(255,255,255,0.04); }
+  .gm-card { position:relative; background:rgba(255,255,255,0.04); border-radius:16px; padding:20px; margin-bottom:14px; box-shadow:0 12px 40px rgba(0,0,0,0.45); transition:background 0.4s; overflow:hidden; }
+  .gm-card.gm-all-done .gm-progress-num, .gm-card.gm-all-done .gm-progress-label { color:var(--success); }
+  .gm-header { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:14px; }
+  .gm-eyebrow { font-size:10.5px; font-weight:700; letter-spacing:0.18em; text-transform:uppercase; color:var(--text-tertiary); margin-bottom:6px; }
+  .gm-progress-row { display:flex; align-items:baseline; gap:6px; }
+  .gm-progress-num { font-size:42px; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-0.045em; color:var(--text-primary); line-height:1; }
+  .gm-progress-total { font-family:var(--font-mono); font-size:18px; color:var(--text-tertiary); }
+  .gm-progress-label { font-size:11px; font-weight:600; letter-spacing:0.10em; text-transform:uppercase; color:var(--text-tertiary); margin-left:4px; }
+  .gm-streak { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:999px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06); color:var(--text-tertiary); font-size:11px; font-weight:600; letter-spacing:0.10em; text-transform:uppercase; }
+  .gm-streak-num { font-family:var(--font-mono); font-weight:700; font-variant-numeric:tabular-nums; }
+  .gm-streak.gm-streak-active { background:rgba(242,192,99,0.10); color:#F2C063; border-color:rgba(242,192,99,0.32); }
+  .gm-bar { display:flex; gap:4px; height:6px; margin-bottom:16px; }
+  .gm-bar:empty { display:none; }
+  .gm-bar-seg { flex:1; background:rgba(255,255,255,0.06); border-radius:3px; transition:background 0.3s; }
+  .gm-bar-seg-done { background:#6BE3A4; box-shadow:0 0 6px rgba(107,227,164,0.40); }
+  .goal-list { list-style:none; margin:0; padding:0; }
+  .empty-state { text-align:center; font-size:12px; font-style:italic; color:var(--text-tertiary); padding:14px 0; }
+  .gm-row { display:flex; align-items:center; gap:12px; padding:12px 14px; margin-bottom:6px; background:rgba(255,255,255,0.035); border:1px solid rgba(255,255,255,0.06); border-radius:12px; transition:background 0.2s, opacity 0.3s; position:relative; }
+  .gm-row.gm-row-done { opacity:0.45; background:rgba(107,227,164,0.04); }
+  .gm-row.gm-row-done .gm-text { text-decoration:line-through; text-decoration-color:rgba(255,255,255,0.4); }
+  .gm-row.is-drag-over { border-top:2px solid #6BE3A4; }
+  .gm-handle { width:14px; flex-shrink:0; color:var(--text-tertiary); font-weight:700; font-size:14px; letter-spacing:-2px; cursor:grab; opacity:0; transition:opacity 0.2s; user-select:none; }
+  .gm-row:hover .gm-handle { opacity:1; }
+  .gm-check { appearance:none; -webkit-appearance:none; width:22px; height:22px; flex-shrink:0; margin:0; border:1.5px solid rgba(255,255,255,0.18); background:rgba(0,0,0,0.28); border-radius:7px; position:relative; cursor:pointer; transition:background 0.2s, border-color 0.2s, box-shadow 0.25s; }
+  .gm-check:checked { background:#6BE3A4; border-color:#6BE3A4; box-shadow:0 0 12px rgba(107,227,164,0.40); }
+  .gm-check:checked::after { content:''; position:absolute; left:6px; top:2px; width:6px; height:11px; border:solid #0A0A0B; border-width:0 2.5px 2.5px 0; transform:rotate(45deg); }
+  .gm-text { flex:1; font-size:14px; color:var(--text-primary); cursor:text; outline:none; border-radius:4px; padding:2px 4px; margin:-2px -4px; }
+  .gm-text[contenteditable="true"] { outline:1px solid rgba(255,255,255,0.18); background:rgba(0,0,0,0.28); }
+  .goal-delete { border:0; background:transparent; color:var(--text-tertiary); font-size:18px; cursor:pointer; padding:0 4px; opacity:0.5; transition:opacity 0.2s, color 0.2s; }
+  .gm-row:hover .goal-delete { opacity:1; }
+  .goal-delete:hover { color:var(--danger); }
+  .gm-show-toggle { width:100%; margin:6px 0 0; padding:9px; border:1px dashed rgba(255,255,255,0.12); border-radius:10px; background:transparent; color:var(--text-tertiary); font-family:inherit; font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; cursor:pointer; }
+  .gm-show-toggle:hover { color:var(--text-primary); border-color:rgba(255,255,255,0.22); }
+  .gm-input-wrap { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:14px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.06); }
+  .gm-input { flex:1; min-width:0; padding:11px 14px; border:1px solid rgba(255,255,255,0.08); border-radius:12px; background:rgba(0,0,0,0.28); color:var(--text-primary); font-family:inherit; font-size:14px; outline:none; transition:border-color 0.2s, background 0.2s; }
+  .gm-input::placeholder { color:var(--text-tertiary); }
+  .gm-input:focus { border-color:rgba(255,255,255,0.28); background:rgba(0,0,0,0.36); }
+  .gm-add { padding:11px 20px; border:0; border-radius:12px; background:linear-gradient(180deg,#FFFFFF,#E8E5DD); color:#0A0A0B; font-family:inherit; font-size:13px; font-weight:700; cursor:pointer; box-shadow:inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 22px rgba(0,0,0,0.25); transition:transform 0.1s, filter 0.15s; }
+  .gm-add:hover { filter:brightness(1.06); transform:translateY(-1px); }
+  </style>
+  <div class="gm-section">
+    <div class="ticker-row">
+      <div class="goal-ticker" id="goalTicker" aria-live="polite" aria-atomic="true">
+        <div class="goal-ticker-led"><span class="goal-ticker-led-dot"></span></div>
+        <div class="goal-ticker-label">GOALS</div>
+        <div class="goal-ticker-stage" id="goalTickerStage">
+          <div class="goal-ticker-row"><span class="goal-ticker-status" data-status="">&mdash;</span><span class="goal-ticker-text">Loading&hellip;</span></div>
+        </div>
+        <div class="goal-ticker-meta" id="goalTickerMeta">0/0</div>
+      </div>
+    </div>
+    <div class="gm-card" id="gmCardToday">
+      <div class="gm-header">
+        <div class="gm-header-left">
+          <div class="gm-eyebrow" id="todayLabel">Today &mdash;</div>
+          <div class="gm-progress-row">
+            <span class="gm-progress-num" id="gmProgressNum">0</span>
+            <span class="gm-progress-total" id="gmProgressTotal">/ 0</span>
+            <span class="gm-progress-label" id="gmProgressLabel">no goals yet</span>
+          </div>
+        </div>
+        <div class="gm-streak" id="gmStreak"><span class="gm-streak-icon">⚡</span><span class="gm-streak-num" id="gmStreakNum">0</span><span>day streak</span></div>
+      </div>
+      <div class="gm-bar" id="gmBar"></div>
+      <ul id="goalList" class="goal-list"></ul>
+      <div id="emptyState" class="empty-state">No goals for today yet &mdash; add one below.</div>
+      <div class="gm-input-wrap">
+        <input id="goalInput" class="gm-input" type="text" placeholder="Add a goal for today&hellip;" autocomplete="off">
+        <button type="button" id="goalAddBtn" class="gm-add">+ Add</button>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function () {
+    'use strict';
+    const RESET_HOUR = 6; // goals roll over at 6 AM
+    function sget(k){ try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }
+    function sset(k,v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} if (typeof k==='string' && k.indexOf('goals:')===0) window.dispatchEvent(new CustomEvent('goals-changed')); }
+    function sdel(k){ try { localStorage.removeItem(k); } catch {} }
+    function listKeys(p){ const o=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&k.indexOf(p)===0) o.push(k);} return o; }
+    function pad2(n){ return String(n).padStart(2,'0'); }
+    function dkey(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+    function activeDate(){ const n=new Date(); if(n.getHours()<RESET_HOUR){ const d=new Date(n); d.setDate(d.getDate()-1); return dkey(d);} return dkey(n); }
+    function fmtDate(s){ const p=s.split('-').map(Number); const d=new Date(p[0],p[1]-1,p[2]); const wk=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]; const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]; return wk+', '+mo+' '+d.getDate(); }
+    function todayKey(){ return 'goals:'+activeDate(); }
+    function getGoals(k){ const g=sget(k); return Array.isArray(g)?g:[]; }
+    function setGoals(k,l){ sset(k,l); }
+    const $ = (id)=>document.getElementById(id);
+
+    function rollover(){
+      const td=activeDate(), tk='goals:'+td; const today=getGoals(tk); const texts=new Set(today.map(g=>g.text));
+      listKeys('goals:').forEach(k=>{ const ds=k.slice(6); if(ds>=td) return; getGoals(k).forEach(g=>{ if(!g.done&&g.text&&!texts.has(g.text)){ today.push({text:g.text,done:false}); texts.add(g.text);} }); sdel(k); });
+      setGoals(tk,today);
+    }
+    function loadStreak(){ const s=sget('goal_streak_v1'); return (s&&typeof s.count==='number')?s:{count:0,lastProcessedDate:''}; }
+    function processStreak(){ const s=loadStreak(); const td=activeDate(); listKeys('goals:').map(k=>k.slice(6)).filter(d=>d<td).sort().forEach(ds=>{ if(s.lastProcessedDate&&ds<=s.lastProcessedDate)return; const l=getGoals('goals:'+ds); if(l.length===0){} else if(l.every(g=>g.done)) s.count+=1; else s.count=0; s.lastProcessedDate=ds; }); sset('goal_streak_v1',s); }
+
+    // ---- ticker ----
+    let cycleIdx=0, tickerTimer=null, firstTick=true;
+    function tickerItems(){ const g=getGoals(todayKey()); const total=g.length, done=g.filter(x=>x.done).length;
+      if(total===0) return {items:[{status:'empty',text:'No goals set for today — add one to get rolling.'}],done,total};
+      if(done===total) return {items:[{status:'done',text:'✓ All goals done — solid day.'}],done,total};
+      return {items:g.filter(x=>!x.done).map(x=>({status:'pending',text:x.text})),done,total};
+    }
+    function glyph(s){ return s==='done'?'✓':s==='pending'?'○':'·'; }
+    function tick(){ const r=tickerItems(); if(cycleIdx>=r.items.length)cycleIdx=0; const it=r.items[cycleIdx]; cycleIdx=(cycleIdx+1)%r.items.length; $('goalTickerMeta').textContent=r.done+'/'+r.total;
+      let row=$('goalTickerStage').querySelector('.goal-ticker-row'); if(!row){ row=document.createElement('div'); row.className='goal-ticker-row'; row.innerHTML='<span class="goal-ticker-status"></span><span class="goal-ticker-text"></span>'; $('goalTickerStage').appendChild(row); }
+      const st=row.querySelector('.goal-ticker-status'), tx=row.querySelector('.goal-ticker-text');
+      const apply=()=>{ st.setAttribute('data-status',it.status); st.textContent=glyph(it.status); tx.textContent=it.text; row.classList.remove('is-fading'); };
+      if(firstTick){ apply(); firstTick=false; return; } row.classList.add('is-fading'); setTimeout(apply,220);
+    }
+    function startTicker(){ tick(); if(tickerTimer)clearInterval(tickerTimer); tickerTimer=setInterval(tick,5000); }
+    window.addEventListener('goals-changed',()=>{ cycleIdx=0; tick(); });
+
+    // ---- rows ----
+    function makeInlineEdit(textEl, idx, key, reload){
+      textEl.addEventListener('click',()=>{ if(textEl.getAttribute('contenteditable')==='true')return; const orig=textEl.textContent; textEl.setAttribute('contenteditable','true'); textEl.focus();
+        const rg=document.createRange(); rg.selectNodeContents(textEl); rg.collapse(false); const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(rg);
+        function commit(){ const nx=textEl.textContent.trim(); textEl.removeAttribute('contenteditable'); if(nx&&nx!==orig){ const l=getGoals(key); if(l[idx]){ l[idx].text=nx; setGoals(key,l);} reload(); } else textEl.textContent=orig; }
+        function cancel(){ textEl.removeAttribute('contenteditable'); textEl.textContent=orig; }
+        textEl.addEventListener('blur',commit,{once:true});
+        textEl.addEventListener('keydown',function onK(e){ if(e.key==='Enter'){e.preventDefault();textEl.removeEventListener('keydown',onK);textEl.blur();} else if(e.key==='Escape'){e.preventDefault();textEl.removeEventListener('keydown',onK);cancel();} });
+      });
+    }
+    function wireDrag(row,key,reload){ row.setAttribute('draggable','true');
+      row.addEventListener('dragstart',e=>{ e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',row.dataset.idx); });
+      row.addEventListener('dragover',e=>{ e.preventDefault(); row.classList.add('is-drag-over'); });
+      row.addEventListener('dragleave',()=>row.classList.remove('is-drag-over'));
+      row.addEventListener('drop',e=>{ e.preventDefault(); row.classList.remove('is-drag-over'); const from=parseInt(e.dataTransfer.getData('text/plain'),10); const to=parseInt(row.dataset.idx,10); if(isNaN(from)||isNaN(to)||from===to)return; const l=getGoals(key); const m=l.splice(from,1)[0]; l.splice(to,0,m); setGoals(key,l); reload(); });
+    }
+    function buildRow(goal,idx,key,reload){
+      const li=document.createElement('li'); li.className='gm-row'; li.dataset.idx=String(idx); if(goal.done)li.classList.add('gm-row-done');
+      const h=document.createElement('span'); h.className='gm-handle'; h.textContent='⋮⋮'; li.appendChild(h);
+      const cb=document.createElement('input'); cb.type='checkbox'; cb.className='gm-check'; cb.checked=!!goal.done;
+      cb.addEventListener('change',()=>{ const l=getGoals(key); if(!l[idx])return; l[idx].done=cb.checked; if(cb.checked)l[idx].doneAt=Date.now(); else delete l[idx].doneAt; setGoals(key,l); reload(); });
+      li.appendChild(cb);
+      const t=document.createElement('span'); t.className='gm-text'; t.textContent=goal.text; li.appendChild(t); makeInlineEdit(t,idx,key,reload);
+      const del=document.createElement('button'); del.type='button'; del.className='goal-delete'; del.setAttribute('aria-label','Delete goal'); del.textContent='×';
+      del.addEventListener('click',()=>{ const l=getGoals(key); l.splice(idx,1); setGoals(key,l); reload(); }); li.appendChild(del);
+      wireDrag(li,key,reload); return li;
+    }
+    function renderHeader(){ const g=getGoals(todayKey()); const total=g.length, done=g.filter(x=>x.done).length;
+      $('gmProgressNum').textContent=done; $('gmProgressTotal').textContent='/ '+total;
+      $('gmProgressLabel').textContent = total===0?'no goals yet': done===total?'all done — solid day':'complete';
+      $('todayLabel').textContent='Today — '+fmtDate(activeDate());
+      const bar=$('gmBar'); bar.innerHTML=''; g.forEach(x=>{ const s=document.createElement('div'); s.className='gm-bar-seg'+(x.done?' gm-bar-seg-done':''); bar.appendChild(s); });
+      $('gmCardToday').classList.toggle('gm-all-done', total>0&&done===total);
+    }
+    function renderStreak(){ const s=loadStreak(); $('gmStreakNum').textContent=s.count; $('gmStreak').classList.toggle('gm-streak-active',s.count>0); }
+    function loadToday(){ const g=getGoals(todayKey()); const listEl=$('goalList'), emptyEl=$('emptyState'); listEl.innerHTML=''; emptyEl.style.display=g.length===0?'block':'none'; const reload=loadToday;
+      const visible=g.length>5?g.slice(0,5):g; visible.forEach((x,i)=>listEl.appendChild(buildRow(x,i,todayKey(),reload)));
+      if(g.length>5){ let exp=false; const tg=document.createElement('button'); tg.type='button'; tg.className='gm-show-toggle'; const upd=()=>tg.textContent=exp?'Show less ▴':('Show '+(g.length-5)+' more ▾'); upd();
+        tg.addEventListener('click',()=>{ exp=!exp; if(exp){ g.slice(5).forEach((x,i)=>listEl.insertBefore(buildRow(x,i+5,todayKey(),reload),tg)); } else { Array.from(listEl.querySelectorAll('.gm-row')).slice(5).forEach(r=>r.remove()); } upd(); }); listEl.appendChild(tg); }
+      renderHeader();
+    }
+    function addHandlers(){ const input=$('goalInput'), btn=$('goalAddBtn');
+      function add(){ const t=input.value.trim(); if(!t)return; const l=getGoals(todayKey()); l.push({text:t,done:false}); setGoals(todayKey(),l); input.value=''; loadToday(); }
+      btn.addEventListener('click',add); input.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); add(); } });
+    }
+
+    rollover(); processStreak(); loadToday(); renderStreak(); addHandlers(); startTicker();
+    window.addEventListener('storage',()=>{ loadToday(); renderStreak(); });
+  })();
+  </script>
+
+  <style>
+  .meal-section { margin-top: 26px; }
+  .slot { background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:16px; padding:14px 16px; margin-bottom:10px; transition:border-color .15s,background .15s; }
+  .slot.done { border-color:rgba(107,227,164,0.22); background:rgba(107,227,164,0.045); }
+  .slot.skipped { opacity:0.6; }
+  .slot-head { display:flex; align-items:center; gap:10px; }
+  .slot-time { font-family:var(--font-mono); font-size:12px; color:var(--text-tertiary); min-width:64px; }
+  .slot-name { font-size:16px; font-weight:700; color:var(--text-primary); }
+  .slot-tag { margin-left:auto; font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; white-space:nowrap; }
+  .slot-tag.ok { color:#6BE3A4; background:rgba(107,227,164,0.12); }
+  .slot-tag.late { color:#F2C063; background:rgba(242,192,99,0.12); }
+  .slot-tag.early { color:#7DD3FC; background:rgba(125,211,252,0.12); }
+  .slot-tag.skip { color:var(--text-tertiary); background:rgba(255,255,255,0.06); }
+  .slot-food { margin-top:8px; font-size:14px; color:var(--text-secondary); }
+  .slot-actual { color:var(--text-tertiary); }
+  .slot-actions { display:flex; gap:8px; margin-top:12px; }
+  .slot-log { flex:1; padding:10px; border-radius:11px; border:1px dashed rgba(255,255,255,0.18); background:transparent; color:var(--text-secondary); font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+  .slot-log:hover { background:rgba(255,255,255,0.04); color:var(--text-primary); }
+  .slot-skip { padding:10px 14px; border-radius:11px; border:1px solid rgba(255,255,255,0.08); background:transparent; color:var(--text-tertiary); font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+  .slot-skip:hover { color:var(--text-secondary); }
+  .slot-edit { margin-top:10px; background:transparent; border:none; color:var(--text-tertiary); font-size:12px; cursor:pointer; font-family:inherit; text-decoration:underline; }
+  .slot-form { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .m-input { flex:1; min-width:150px; padding:11px; border:1px solid rgba(255,255,255,0.1); border-radius:10px; background:rgba(0,0,0,0.3); color:var(--text-primary); font-size:15px; outline:none; }
+  .m-input:focus { border-color:rgba(255,255,255,0.3); }
+  .m-time { padding:11px; border:1px solid rgba(255,255,255,0.1); border-radius:10px; background:rgba(0,0,0,0.3); color:var(--text-primary); font-size:15px; font-family:inherit; }
+  .m-save { padding:11px 18px; border-radius:10px; border:0; background:linear-gradient(180deg,#FFF,#E8E5DD); color:#0A0A0B; font-weight:700; font-family:inherit; cursor:pointer; }
+  </style>
+  <div class="meal-section">
+    <div class="gm-eyebrow" style="margin-bottom:10px">Meals &mdash; <span id="mealsDate">today</span></div>
+    <div id="mealSlots"></div>
+    <a id="mealsSheetLink" class="dash-link" target="_blank" rel="noopener" style="display:none; margin-top:8px">📄 Meal history in Google Sheets →</a>
+    <div id="mealsStatus" style="text-align:center;font-size:12px;color:var(--text-secondary);min-height:16px;margin-top:8px"></div>
+  </div>
+  <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    'use strict';
+    const SLOTS = [
+      { id:'breakfast', name:'Breakfast', h:9,  m:0  },
+      { id:'snack1',    name:'Snack',     h:11, m:0  },
+      { id:'lunch',     name:'Lunch',     h:13, m:0  },
+      { id:'snack2',    name:'Snack',     h:15, m:30 },
+      { id:'dinner',    name:'Dinner',    h:19, m:0  },
+      { id:'snack3',    name:'Snack',     h:21, m:0  }
+    ];
+    const $ = (id) => document.getElementById(id);
+    const list = $('mealSlots');
+    if (!list) return;
+    function ymd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+    function logKey(){ return 'meals:log:'+ymd(new Date()); }
+    function loadLog(){ try { return JSON.parse(localStorage.getItem(logKey()))||{}; } catch { return {}; } }
+    function saveLog(o){ try { localStorage.setItem(logKey(), JSON.stringify(o)); } catch {} }
+    function fmt12(h,m){ const ap=h>=12?'PM':'AM'; let hh=h%12; if(hh===0)hh=12; return hh+':'+String(m).padStart(2,'0')+' '+ap; }
+    function hhmmNow(){ const d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+    function escapeHtml(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    function timing(sh,sm,hhmm){ const p=hhmm.split(':'); const act=(+p[0])*60+(+p[1]); const sch=sh*60+sm; const d=act-sch; if(Math.abs(d)<=15)return{tag:'on time',cls:'ok'}; const mins=Math.abs(d),h=Math.floor(mins/60),mm=mins%60; const str=(h>0?h+'h ':'')+mm+'m'; return d>0?{tag:'+'+str+' late',cls:'late'}:{tag:str+' early',cls:'early'}; }
+    function setStatus(m){ const e=$('mealsStatus'); if(e) e.textContent=m||''; }
+    function showSheetLink(id){ const a=$('mealsSheetLink'); if(a){ a.href = window.Sheets ? Sheets.link(id) : '#'; a.style.display='inline-flex'; } }
+
+    function render(){
+      $('mealsDate').textContent = new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
+      const log = loadLog(); list.innerHTML='';
+      SLOTS.forEach(slot=>{
+        const l=log[slot.id]; const card=document.createElement('div');
+        card.className='slot'+(l?(l.skipped?' skipped':' done'):'');
+        let html='<div class="slot-head"><div class="slot-time">'+fmt12(slot.h,slot.m)+'</div><div class="slot-name">'+slot.name+'</div>';
+        if(l&&!l.skipped) html+='<span class="slot-tag '+l.cls+'">'+l.tag+'</span>';
+        if(l&&l.skipped)  html+='<span class="slot-tag skip">didn’t eat</span>';
+        html+='</div>';
+        if(l&&!l.skipped){ html+='<div class="slot-food">'+escapeHtml(l.food)+' <span class="slot-actual">· ate '+l.actualDisp+'</span></div><button class="slot-edit" data-id="'+slot.id+'">edit</button>'; }
+        else if(l&&l.skipped){ html+='<button class="slot-edit" data-id="'+slot.id+'">undo</button>'; }
+        else {
+          html+='<div class="slot-form" id="form-'+slot.id+'" style="display:none"><input class="m-input" id="food-'+slot.id+'" placeholder="What did you eat?" autocomplete="off" spellcheck="false"><input class="m-time" id="time-'+slot.id+'" type="time" value="'+hhmmNow()+'"><button class="m-save" data-id="'+slot.id+'">Save</button></div>';
+          html+='<div class="slot-actions"><button class="slot-log" id="logbtn-'+slot.id+'" data-id="'+slot.id+'">+ Log '+slot.name.toLowerCase()+'</button><button class="slot-skip" data-id="'+slot.id+'">Didn’t eat</button></div>';
+        }
+        card.innerHTML=html; list.appendChild(card);
+      });
+      list.querySelectorAll('.slot-log').forEach(b=>b.addEventListener('click',()=>openForm(b.dataset.id)));
+      list.querySelectorAll('.slot-skip').forEach(b=>b.addEventListener('click',()=>skip(b.dataset.id)));
+      list.querySelectorAll('.slot-edit').forEach(b=>b.addEventListener('click',()=>{ const lg=loadLog(); delete lg[b.dataset.id]; saveLog(lg); render(); }));
+      list.querySelectorAll('.m-save').forEach(b=>b.addEventListener('click',()=>save(b.dataset.id)));
+      list.querySelectorAll('.m-input').forEach(inp=>inp.addEventListener('keydown',e=>{ if(e.key==='Enter') save(inp.id.replace('food-','')); }));
+    }
+    function openForm(id){ const f=$('form-'+id), b=$('logbtn-'+id); if(f){ f.style.display='flex'; if(b&&b.parentElement) b.parentElement.style.display='none'; const fi=$('food-'+id); if(fi)fi.focus(); } }
+
+    async function appendMeal(slot, food, actualDisp, tag){
+      const sid = await Sheets.ensureSheet();
+      await Sheets.appendRow(sid,'Meals',[ymd(new Date()), slot.name, fmt12(slot.h,slot.m), food, actualDisp, tag]);
+      showSheetLink(sid);
+    }
+    function scopeMsg(e){ const m=(e&&e.message)||String(e); return /PERMISSION_DENIED|403|insufficient|scope|not connected|not defined/i.test(m) ? 'Logged here. Connect/reconnect Fitbit above to sync meals to Google Sheets.' : ('Logged here, sheet sync failed: '+m); }
+
+    async function save(id){
+      const slot=SLOTS.find(s=>s.id===id); const fi=$('food-'+id), ti=$('time-'+id);
+      const food=(fi.value||'').trim(); const hhmm=ti.value||hhmmNow();
+      if(!food){ fi.focus(); return; }
+      const t=timing(slot.h,slot.m,hhmm); const p=hhmm.split(':'); const actualDisp=fmt12(+p[0],+p[1]);
+      const log=loadLog(); log[id]={food,actual:hhmm,actualDisp,tag:t.tag,cls:t.cls}; saveLog(log); render();
+      try { setStatus('Saving to your sheet…'); await appendMeal(slot, food, actualDisp, t.tag); setStatus('Saved ✓'); setTimeout(()=>setStatus(''),1500); }
+      catch(e){ setStatus(scopeMsg(e)); }
+    }
+    async function skip(id){
+      const slot=SLOTS.find(s=>s.id===id);
+      const log=loadLog(); log[id]={skipped:true}; saveLog(log); render();
+      try { setStatus('Saving…'); await appendMeal(slot, "(didn’t eat)", '', 'skipped'); setStatus('Saved ✓'); setTimeout(()=>setStatus(''),1500); }
+      catch(e){ setStatus(scopeMsg(e)); }
+    }
+
+    render();
+    if (window.Sheets) Sheets.loadId().then(id=>{ if(id) showSheetLink(id); }).catch(()=>{});
+  });
+  </script>
+
+  <div class="dash-links">
+    <a href="weight.html" class="dash-link">⚖️ Weight</a>
+    <a href="calendar.html" class="dash-link">📅 Calendar</a>
+  </div>
 
   <div class="attribution">// editable template · all data stays in your browser</div>
 </main>
+
+<!-- Day-left ring (9 AM - midnight); color grows urgent as the day ends -->
+<script>
+(function () {
+  'use strict';
+  const WAKE_HOUR = 9, SLEEP_HOUR = 24;
+  const fillEl = document.getElementById('dayRingFill');
+  if (!fillEl) return;
+  const C = 2 * Math.PI * 52;
+  fillEl.setAttribute('stroke-dasharray', C);
+  // calm (lots of day left) -> urgent red (almost out), keyed by % elapsed
+  const PALETTE = [[0,[120,200,255]],[20,[110,220,170]],[40,[242,200,110]],[60,[255,160,90]],[80,[243,100,90]],[100,[226,70,90]]];
+  function lerp(a,b,t){ return a+(b-a)*t; }
+  function paletteAt(p){ if(p<=0)return PALETTE[0][1]; if(p>=100)return PALETTE[PALETTE.length-1][1];
+    for(let i=0;i<PALETTE.length-1;i++){ const a=PALETTE[i], b=PALETTE[i+1]; if(p>=a[0]&&p<=b[0]){ const t=(p-a[0])/(b[0]-a[0]); return [lerp(a[1][0],b[1][0],t),lerp(a[1][1],b[1][1],t),lerp(a[1][2],b[1][2],t)]; } } return [255,255,255]; }
+  function rgb(c){ return 'rgb('+Math.round(c[0])+','+Math.round(c[1])+','+Math.round(c[2])+')'; }
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function clock(d){ let h=d.getHours(); const m=d.getMinutes(); const ap=h>=12?'PM':'AM'; h=h%12; if(h===0)h=12; return h+':'+pad2(m)+' '+ap; }
+  function rem(min){ const h=Math.floor(min/60), m=Math.floor(min%60); return h+'h '+m+'m'; }
+  const $ = (id) => document.getElementById(id);
+  function update(){
+    const now = new Date();
+    const hours = now.getHours() + now.getMinutes()/60 + now.getSeconds()/3600;
+    $('dayRingClock').textContent = clock(now);
+    if (hours < WAKE_HOUR) {
+      fillEl.setAttribute('stroke-dashoffset', C); fillEl.style.stroke = '#4D4B47';
+      $('dayRingPercent').textContent = '—'; $('dayRingPhase').textContent = 'BEFORE 9 AM';
+      $('dayRingStatus').textContent = '🌅 Day not started yet';
+      $('dayRingRemaining').textContent = rem((WAKE_HOUR - hours) * 60) + ' until 9 AM';
+      return;
+    }
+    if (hours >= SLEEP_HOUR) {
+      fillEl.setAttribute('stroke-dashoffset', C); fillEl.style.stroke = '#E2465A';
+      $('dayRingPercent').textContent = '0%'; $('dayRingPhase').textContent = 'DAY OVER';
+      $('dayRingStatus').textContent = '🌙 Day is done'; $('dayRingRemaining').textContent = 'Past midnight';
+      return;
+    }
+    const span = SLEEP_HOUR - WAKE_HOUR;
+    const elapsed = (hours - WAKE_HOUR) / span * 100;
+    fillEl.setAttribute('stroke-dashoffset', C * (elapsed / 100)); // ring depletes through the day
+    fillEl.style.stroke = rgb(paletteAt(elapsed));
+    $('dayRingPercent').textContent = Math.round(100 - elapsed) + '%';
+    let status;
+    if (elapsed < 25)      status = '☀️ Morning — fresh start';
+    else if (elapsed < 50) status = '⚡ Midday — keep moving';
+    else if (elapsed < 75) status = '🔥 Afternoon — push it';
+    else if (elapsed < 90) status = '⏳ Evening — wrap it up';
+    else                   status = '🌙 Running out — focus';
+    $('dayRingPhase').textContent = 'DAY LEFT';
+    $('dayRingStatus').textContent = status;
+    $('dayRingRemaining').textContent = rem((SLEEP_HOUR - hours) * 60) + ' left';
+  }
+  update();
+  setInterval(update, 30000);
+})();
+</script>
 
 <script>
 (() => {
