@@ -941,7 +941,7 @@ main {
           <div class="wh-stat"><span class="wh-zone" id="fbZoneRhr"></span><div class="wh-stat-label">RHR</div><div class="wh-stat-val" id="fbRhr">&mdash;</div><div class="wh-stat-sub">bpm</div></div>
         </div>
         <div id="fbBio" class="wh-bio" style="display:none">
-          <div class="wh-bio-item"><span class="wh-zone" id="fbZoneSkin"></span><span class="wh-bio-label">Skin temp &Delta;</span><span class="wh-bio-val" id="fbSkin">&mdash;</span></div>
+          <div class="wh-bio-item"><span class="wh-zone" id="fbZoneSkin"></span><span class="wh-bio-label">Skin temp</span><span class="wh-bio-val" id="fbSkin">&mdash;</span></div>
           <div class="wh-bio-item"><span class="wh-zone" id="fbZoneSpo2"></span><span class="wh-bio-label">Blood O&#8322;</span><span class="wh-bio-val" id="fbSpo2">&mdash;</span></div>
           <div class="wh-bio-item"><span class="wh-zone" id="fbZoneResp"></span><span class="wh-bio-label">BRPM</span><span class="wh-bio-val" id="fbResp">&mdash;</span></div>
         </div>
@@ -1079,6 +1079,25 @@ main {
       return dps.map(dp => ({ t: findTime(dp), v: findNum(dp, re) })).filter(x => x.v != null).sort((a, b) => (a.t || 0) - (b.t || 0));
     }
     function median(arr) { if (!arr.length) return null; const s = [...arr].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+    function dpPlatform(dp) { return (dp && dp.dataSource && dp.dataSource.platform) || ''; }
+    function dpCivilYMD(dp) {
+      let ymd = null;
+      (function walk(o) {
+        if (ymd || o == null || typeof o !== 'object') return;
+        if (Array.isArray(o)) { o.forEach(walk); return; }
+        if (typeof o.year === 'number' && typeof o.month === 'number' && typeof o.day === 'number') {
+          ymd = o.year + '-' + String(o.month).padStart(2, '0') + '-' + String(o.day).padStart(2, '0'); return;
+        }
+        for (const v of Object.values(o)) { walk(v); if (ymd) return; }
+      })(dp);
+      return ymd;
+    }
+    // Collapse many intraday readings into one median value per civil day, oldest -> newest.
+    function dailyMedians(dps, re) {
+      const byDay = {};
+      for (const dp of dps) { const v = findNum(dp, re); if (v == null) continue; const d = dpCivilYMD(dp) || '0'; (byDay[d] = byDay[d] || []).push(v); }
+      return Object.keys(byDay).sort().map(d => ({ day: d, v: median(byDay[d]) }));
+    }
     function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
     function pTime(o, which) { if (!o || typeof o !== 'object') return null; for (const [k, v] of Object.entries(o)) { if (typeof v === 'string' && new RegExp(which, 'i').test(k) && /time/i.test(k)) { const ms = Date.parse(v); if (!isNaN(ms)) return ms; } } return null; }
@@ -1101,19 +1120,25 @@ main {
     }
     function parseSleep(dps) {
       if (!dps || !dps.length) return null;
-      const stages = [];
+      // Most recent sleep session, by interval end time.
+      let best = null, bestEnd = -1;
       for (const dp of dps) {
-        const sObj = dp.sleep || dp;
-        if (sObj && Array.isArray(sObj.stages)) { for (const st of sObj.stages) pushStage(stages, st); }
-        else pushStage(stages, sObj);
+        const s = dp.sleep || dp;
+        const end = (s && s.interval && s.interval.endTime) ? Date.parse(s.interval.endTime) : (findTime(dp) || 0);
+        if (end > bestEnd) { bestEnd = end; best = s; }
       }
-      if (!stages.length) return null;
-      const latest = Math.max.apply(null, stages.map(s => s.end || 0));
-      const cutoff = latest - 14 * 3600e3; // keep the most recent night only
-      const recent = stages.filter(s => (s.end || 0) >= cutoff);
+      if (!best) return null;
       const tot = { rem: 0, deep: 0, light: 0, awake: 0 };
-      for (const s of recent) tot[s.bucket] += s.ms;
-      tot.total = tot.rem + tot.deep + tot.light + tot.awake;
+      const add = (type, ms) => { const k = (type || '').toLowerCase(); if (k === 'rem') tot.rem += ms; else if (k === 'deep') tot.deep += ms; else if (k === 'awake' || k === 'wake') tot.awake += ms; else tot.light += ms; };
+      // Prefer Fitbit's authoritative per-stage summary; fall back to summing the stage intervals.
+      if (best.summary && Array.isArray(best.summary.stagesSummary)) {
+        for (const st of best.summary.stagesSummary) add(st.type, (Number(st.minutes) || 0) * 60000);
+      } else if (Array.isArray(best.stages)) {
+        for (const st of best.stages) add(st.type, (Date.parse(st.endTime) - Date.parse(st.startTime)) || 0);
+      } else return null;
+      tot.total = tot.rem + tot.deep + tot.light + tot.awake;            // time in bed
+      tot.asleep = (best.summary && best.summary.minutesAsleep != null)   // time asleep
+        ? Number(best.summary.minutesAsleep) * 60000 : (tot.rem + tot.deep + tot.light);
       return tot.total > 0 ? tot : null;
     }
 
@@ -1188,21 +1213,29 @@ main {
           gFetch('sleep',                             'sleep.interval.end_time >= "' + days(2) + '"', t, 200).catch(e => { console.error('[fitbit] sleep', e.message); return []; })
         ]);
 
-        const hrvS = series(hrvDps, /rmssd/i);
-        const rhrS = series(rhrDps, /beatsPerMinute|restingHeartRate|bpm/i);
+        // HRV/RHR: collapse intraday readings to one median per civil day; today = newest day.
+        const hrvS = dailyMedians(hrvDps, /rootMeanSquare|rmssd/i);
+        const rhrS = dailyMedians(rhrDps, /beatsPerMinute/i);
         const hrv = hrvS.length ? Math.round(hrvS[hrvS.length - 1].v) : null;
         const rhr = rhrS.length ? Math.round(rhrS[rhrS.length - 1].v) : null;
-        const spo2S = series(spo2Dps, /percentage|saturation/i); const spo2 = spo2S.length ? spo2S[spo2S.length - 1].v : null;
-        const respS = series(respDps, /breathsPerMinute|respirat/i); const resp = respS.length ? respS[respS.length - 1].v : null;
-        const tempS = series(tempDps, /celsius|stddev|temperature/i); const skin = tempS.length ? tempS[tempS.length - 1].v : null;
+        // SpO2 spot readings are noisy (a bad-contact reading can be ~50%) → median of plausible values.
+        const spo2Vals = spo2Dps.map(dp => findNum(dp, /percentage|saturation/i)).filter(v => v != null && v >= 70 && v <= 100);
+        const spo2 = spo2Vals.length ? median(spo2Vals) : null;
+        const respS = dailyMedians(respDps, /breathsPerMinute/i); const resp = respS.length ? respS[respS.length - 1].v : null;
+        const tempS = dailyMedians(tempDps, /nightlyTemperature/i); const skin = tempS.length ? tempS[tempS.length - 1].v : null;
 
-        const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+        // Steps: Google Health merges Fitbit + phone (HealthKit) → summing all double-counts.
+        // Use the Fitbit Air's own steps, today only.
+        const now2 = new Date();
+        const todayYMD = now2.getFullYear() + '-' + String(now2.getMonth() + 1).padStart(2, '0') + '-' + String(now2.getDate()).padStart(2, '0');
+        const fitbitSteps = stepsDps.filter(dp => dpPlatform(dp) === 'FITBIT');
+        const useSteps = fitbitSteps.length ? fitbitSteps : stepsDps;
         let steps = null;
-        if (stepsDps.length) { steps = 0; for (const dp of stepsDps) { const tt = findTime(dp); if (tt == null || tt >= todayStart.getTime()) { const c = findNum(dp, /count|steps/i); if (c != null) steps += c; } } }
+        { let sum = 0, any = false; for (const dp of useSteps) { if (dpCivilYMD(dp) === todayYMD) { const c = findNum(dp, /count/i); if (c != null) { sum += c; any = true; } } } if (any) steps = sum; }
 
         let stg = null; try { stg = parseSleep(sleepDps); } catch (e) { console.error('[fitbit] sleep parse', e); }
         let sleepHours = null;
-        if (stg && stg.total > 0) { sleepHours = (stg.rem + stg.deep + stg.light) / 3.6e6; renderStages(stg); }
+        if (stg && stg.total > 0) { sleepHours = stg.asleep / 3.6e6; renderStages(stg); }
 
         renderRing(readiness(hrvS, rhrS, sleepHours));
 
@@ -1214,7 +1247,7 @@ main {
         const anyBio = (skin != null) || (spo2 != null) || (resp != null);
         if (anyBio) {
           $('fbBio').style.display = '';
-          if (skin != null) $('fbSkin').textContent = (skin > 0 ? '+' : '') + (Number(skin) * 1.8).toFixed(2) + '°F';
+          if (skin != null) $('fbSkin').textContent = (Number(skin) * 9 / 5 + 32).toFixed(1) + '°F';
           if (spo2 != null) { $('fbSpo2').textContent = Number(spo2).toFixed(0) + '%'; zone($('fbZoneSpo2'), spo2Zone(spo2)); }
           if (resp != null) { $('fbResp').textContent = Number(resp).toFixed(1); zone($('fbZoneResp'), respZone(Number(resp))); }
         }
@@ -1227,6 +1260,7 @@ main {
           dbg.textContent = JSON.stringify({
             counts: { hrv: hrvDps.length, rhr: rhrDps.length, spo2: spo2Dps.length, resp: respDps.length, temp: tempDps.length, steps: stepsDps.length, sleep: sleepDps.length },
             parsed: { hrv, rhr, spo2, resp, skin, steps, sleepHours },
+            diag: { hrvDays: hrvS.length, rhrDays: rhrS.length, spo2_valid: spo2Vals.length, steps_fitbit_pts: fitbitSteps.length, today: todayYMD },
             hrv_sample: sample(hrvDps), rhr_sample: sample(rhrDps), spo2_sample: sample(spo2Dps),
             resp_sample: sample(respDps), temp_sample: sample(tempDps), steps_sample: sample(stepsDps), sleep_sample: sample(sleepDps)
           }, null, 2);
