@@ -12,7 +12,7 @@
   const TITLE = "Connor's Dashboard";
   const ID_KEY = 'dash_sheet_id';
   const HEADERS = {
-    Meals:  ['Date', 'Meal', 'Scheduled', 'Food', 'Actual', 'Timing'],
+    Meals:  ['Date', 'Meal', 'Scheduled', 'Food', 'Actual', 'Timing', 'Reason'],
     Weight: ['Date', 'Time', 'Weight', 'Unit', 'Note']
   };
 

@@ -606,8 +606,10 @@ main {
     /* Dual rings: readiness + day-left */
     .fb-rings { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:20px; margin:6px auto 16px; }
     .fb-rings .wh-ring-wrap { width:150px; margin:0; max-width:none; }
-    .fb-rings .wh-ring-num { font-size:40px; }
-    .fb-rings .wh-ring-unit { margin-top:6px; }
+    .fb-rings .wh-ring-center { padding:0 16px; }
+    .fb-rings .wh-ring-num { font-size:34px; }
+    .fb-rings .wh-ring-unit { font-size:9px; margin-top:6px; letter-spacing:0.18em; }
+    .fb-rings .wh-ring-label { font-size:10.5px; margin-top:4px; line-height:1.2; max-width:118px; margin-left:auto; margin-right:auto; }
     .day-ring { position:relative; width:150px; height:150px; flex-shrink:0; }
     .day-ring svg { width:100%; height:100%; display:block; }
     .day-ring-track { fill:none; stroke:rgba(255,255,255,0.06); stroke-width:8; }
@@ -1019,7 +1021,8 @@ main {
       'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
       'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly',
       'https://www.googleapis.com/auth/spreadsheets',
-      'https://www.googleapis.com/auth/calendar.events'
+      'https://www.googleapis.com/auth/calendar.events',
+      'https://www.googleapis.com/auth/calendar.calendarlist.readonly'
     ].join(' ');
     const DEBUG = true; // logs raw Google Health responses to the browser console
     const DEBUG_PANEL = /fbdebug/i.test(location.hash) || /fbdebug/i.test(location.search); // on-screen raw dump for tuning
@@ -1211,7 +1214,7 @@ main {
     function sleepHoursZone(h) { if (h == null) return null; if (h >= 7.5) return 'good'; if (h >= 6.5) return 'norm'; if (h >= 5) return 'warn'; return 'bad'; }
     function stepsZone(s) { if (s == null) return null; if (s >= 10000) return 'good'; if (s >= 7000) return 'norm'; if (s >= 4000) return 'warn'; return 'bad'; }
     function ringStroke(s) { if (s >= 67) return '#6BE3A4'; if (s >= 34) return '#F2C063'; return '#FF8A8A'; }
-    function recoveryLabel(s) { if (s >= 67) return 'Go hard today'; if (s >= 34) return 'Moderate — listen to body'; return 'Recover today'; }
+    function recoveryLabel(s) { if (s >= 67) return 'Go hard'; if (s >= 34) return 'Moderate'; return 'Recover'; }
     function verdict(rec) {
       if (rec == null) return null;
       let cls = 'green', badge = 'GREEN', headline = "Push hard today. Readiness is high — go for the harder session or the heavy task.";
@@ -1246,6 +1249,33 @@ main {
       $('fbAwake').textContent = fmtMinsShort(s.awake);
     }
 
+    // Cache the last good reading so a failed/empty refresh (e.g. right after
+    // re-granting access) falls back to it instead of "building baseline".
+    function saveSnap(d) { try { localStorage.setItem('fitbit_snap_v1', JSON.stringify(Object.assign({}, d, { ts: Date.now() }))); } catch (e) {} }
+    function loadSnap() { try { return JSON.parse(localStorage.getItem('fitbit_snap_v1')); } catch (e) { return null; } }
+
+    function paint(d, ts) {
+      renderRing(d.readiness != null ? d.readiness : null);
+      if (d.stages && d.stages.total > 0) renderStages(d.stages);
+      if (d.sleepHours != null) { $('fbSleep').textContent = d.sleepHours.toFixed(1) + 'h'; $('fbSleepSub').textContent = 'asleep'; zone($('fbZoneSleep'), sleepHoursZone(d.sleepHours)); }
+      if (d.steps != null) { $('fbSteps').textContent = d.steps >= 1000 ? (d.steps / 1000).toFixed(d.steps >= 10000 ? 0 : 1) + 'k' : String(d.steps); zone($('fbZoneSteps'), stepsZone(d.steps)); }
+      if (d.hrv != null) { $('fbHrv').textContent = String(d.hrv); zone($('fbZoneHrv'), hrvZone(d.hrv)); }
+      if (d.rhr != null) { $('fbRhr').textContent = String(d.rhr); zone($('fbZoneRhr'), rhrZone(d.rhr)); }
+      const anyBio = (d.skin != null) || (d.spo2 != null) || (d.resp != null);
+      if (anyBio) {
+        $('fbBio').style.display = '';
+        if (d.skin != null) $('fbSkin').textContent = (Number(d.skin) * 9 / 5 + 32).toFixed(1) + '°F';
+        if (d.spo2 != null) { $('fbSpo2').textContent = Number(d.spo2).toFixed(0) + '%'; zone($('fbZoneSpo2'), spo2Zone(d.spo2)); }
+        if (d.resp != null) { $('fbResp').textContent = Number(d.resp).toFixed(1); zone($('fbZoneResp'), respZone(Number(d.resp))); }
+      }
+      const dt = new Date(ts || Date.now());
+      const isToday = (new Date()).toDateString() === dt.toDateString();
+      const when = isToday
+        ? dt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+        : dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + dt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+      $('fbUpdated').textContent = 'Updated ' + when;
+    }
+
     async function loadData() {
       let t = load(); if (!t) return;
       if (t.expires && Date.now() > t.expires - 60000) { const n = await refreshTok(t); if (n) t = n; }
@@ -1262,19 +1292,15 @@ main {
           gFetch('sleep',                             'sleep.interval.end_time >= "' + days(2) + '"', t, 200).catch(e => { console.error('[fitbit] sleep', e.message); return []; })
         ]);
 
-        // HRV/RHR: collapse intraday readings to one median per civil day; today = newest day.
         const hrvS = dailyMedians(hrvDps, /rootMeanSquare|rmssd/i);
         const rhrS = dailyMedians(rhrDps, /beatsPerMinute/i);
         const hrv = hrvS.length ? Math.round(hrvS[hrvS.length - 1].v) : null;
         const rhr = rhrS.length ? Math.round(rhrS[rhrS.length - 1].v) : null;
-        // SpO2 spot readings are noisy (a bad-contact reading can be ~50%) → median of plausible values.
         const spo2Vals = spo2Dps.map(dp => findNum(dp, /percentage|saturation/i)).filter(v => v != null && v >= 70 && v <= 100);
         const spo2 = spo2Vals.length ? median(spo2Vals) : null;
         const respS = dailyMedians(respDps, /breathsPerMinute/i); const resp = respS.length ? respS[respS.length - 1].v : null;
         const tempS = dailyMedians(tempDps, /nightlyTemperature/i); const skin = tempS.length ? tempS[tempS.length - 1].v : null;
 
-        // Steps: Google Health merges Fitbit + phone (HealthKit) → summing all double-counts.
-        // Use the Fitbit Air's own steps, today only.
         const now2 = new Date();
         const todayYMD = now2.getFullYear() + '-' + String(now2.getMonth() + 1).padStart(2, '0') + '-' + String(now2.getDate()).padStart(2, '0');
         const fitbitSteps = stepsDps.filter(dp => dpPlatform(dp) === 'FITBIT');
@@ -1283,25 +1309,8 @@ main {
         { let sum = 0, any = false; for (const dp of useSteps) { if (dpCivilYMD(dp) === todayYMD) { const c = findNum(dp, /count/i); if (c != null) { sum += c; any = true; } } } if (any) steps = sum; }
 
         let stg = null; try { stg = parseSleep(sleepDps); } catch (e) { console.error('[fitbit] sleep parse', e); }
-        let sleepHours = null;
-        if (stg && stg.total > 0) { sleepHours = stg.asleep / 3.6e6; renderStages(stg); }
-
-        renderRing(readiness(hrvS, rhrS, sleepHours));
-
-        if (sleepHours != null) { $('fbSleep').textContent = sleepHours.toFixed(1) + 'h'; $('fbSleepSub').textContent = 'asleep'; zone($('fbZoneSleep'), sleepHoursZone(sleepHours)); }
-        if (steps != null) { $('fbSteps').textContent = steps >= 1000 ? (steps / 1000).toFixed(steps >= 10000 ? 0 : 1) + 'k' : String(steps); zone($('fbZoneSteps'), stepsZone(steps)); }
-        if (hrv != null) { $('fbHrv').textContent = String(hrv); zone($('fbZoneHrv'), hrvZone(hrv)); }
-        if (rhr != null) { $('fbRhr').textContent = String(rhr); zone($('fbZoneRhr'), rhrZone(rhr)); }
-
-        const anyBio = (skin != null) || (spo2 != null) || (resp != null);
-        if (anyBio) {
-          $('fbBio').style.display = '';
-          if (skin != null) $('fbSkin').textContent = (Number(skin) * 9 / 5 + 32).toFixed(1) + '°F';
-          if (spo2 != null) { $('fbSpo2').textContent = Number(spo2).toFixed(0) + '%'; zone($('fbZoneSpo2'), spo2Zone(spo2)); }
-          if (resp != null) { $('fbResp').textContent = Number(resp).toFixed(1); zone($('fbZoneResp'), respZone(Number(resp))); }
-        }
-
-        // (Today's call / verdict removed)
+        const sleepHours = (stg && stg.total > 0) ? stg.asleep / 3.6e6 : null;
+        const rec = readiness(hrvS, rhrS, sleepHours);
 
         if (DEBUG_PANEL) {
           const sample = (arr) => (arr && arr.length ? arr[0] : null);
@@ -1314,8 +1323,15 @@ main {
             resp_sample: sample(respDps), temp_sample: sample(tempDps), steps_sample: sample(stepsDps), sleep_sample: sample(sleepDps)
           }, null, 2);
         }
-        $('fbUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-      } catch (e) { showErr(e.message || String(e)); }
+
+        const fresh = { hrv, rhr, spo2, resp, skin, steps, sleepHours, readiness: rec, stages: (stg && stg.total > 0) ? stg : null };
+        const gotData = (hrv != null || rhr != null || spo2 != null || steps != null || sleepHours != null || rec != null);
+        if (gotData) { paint(fresh, Date.now()); saveSnap(fresh); }
+        else { const snap = loadSnap(); if (snap) paint(snap, snap.ts); else paint(fresh, Date.now()); }
+      } catch (e) {
+        const snap = loadSnap();
+        if (snap) paint(snap, snap.ts); else showErr(e.message || String(e));
+      }
     }
 
     function render() {
@@ -1576,7 +1592,7 @@ main {
   .m-input { flex:1; min-width:150px; padding:11px; border:1px solid rgba(255,255,255,0.1); border-radius:10px; background:rgba(0,0,0,0.3); color:var(--text-primary); font-size:15px; outline:none; }
   .m-input:focus { border-color:rgba(255,255,255,0.3); }
   .m-time { padding:11px; border:1px solid rgba(255,255,255,0.1); border-radius:10px; background:rgba(0,0,0,0.3); color:var(--text-primary); font-size:15px; font-family:inherit; }
-  .m-save { padding:11px 18px; border-radius:10px; border:0; background:linear-gradient(180deg,#FFF,#E8E5DD); color:#0A0A0B; font-weight:700; font-family:inherit; cursor:pointer; }
+  .m-save, .m-skipsave { padding:11px 18px; border-radius:10px; border:0; background:linear-gradient(180deg,#FFF,#E8E5DD); color:#0A0A0B; font-weight:700; font-family:inherit; cursor:pointer; }
   </style>
   <div class="meal-section">
     <div class="gm-eyebrow" style="margin-bottom:10px">Meals &mdash; <span id="mealsDate">today</span></div>
@@ -1619,42 +1635,49 @@ main {
         if(l&&!l.skipped) html+='<span class="slot-tag '+l.cls+'">'+l.tag+'</span>';
         if(l&&l.skipped)  html+='<span class="slot-tag skip">didn’t eat</span>';
         html+='</div>';
-        if(l&&!l.skipped){ html+='<div class="slot-food">'+escapeHtml(l.food)+' <span class="slot-actual">· ate '+l.actualDisp+'</span></div><button class="slot-edit" data-id="'+slot.id+'">edit</button>'; }
-        else if(l&&l.skipped){ html+='<button class="slot-edit" data-id="'+slot.id+'">undo</button>'; }
+        if(l&&!l.skipped){ html+='<div class="slot-food">'+escapeHtml(l.food)+' <span class="slot-actual">· ate '+l.actualDisp+'</span>'+(l.reason?' <span class="slot-actual">· '+escapeHtml(l.reason)+'</span>':'')+'</div><button class="slot-edit" data-id="'+slot.id+'">edit</button>'; }
+        else if(l&&l.skipped){ html+=(l.reason?'<div class="slot-food">'+escapeHtml(l.reason)+'</div>':'')+'<button class="slot-edit" data-id="'+slot.id+'">undo</button>'; }
         else {
-          html+='<div class="slot-form" id="form-'+slot.id+'" style="display:none"><input class="m-input" id="food-'+slot.id+'" placeholder="What did you eat?" autocomplete="off" spellcheck="false"><input class="m-time" id="time-'+slot.id+'" type="time" value="'+hhmmNow()+'"><button class="m-save" data-id="'+slot.id+'">Save</button></div>';
-          html+='<div class="slot-actions"><button class="slot-log" id="logbtn-'+slot.id+'" data-id="'+slot.id+'">+ Log '+slot.name.toLowerCase()+'</button><button class="slot-skip" data-id="'+slot.id+'">Didn’t eat</button></div>';
+          html+='<div class="slot-form" id="form-'+slot.id+'" style="display:none"><input class="m-input" id="food-'+slot.id+'" placeholder="What did you eat?" autocomplete="off" spellcheck="false"><input class="m-time" id="time-'+slot.id+'" type="time" value="'+hhmmNow()+'"><input class="m-input" id="reason-'+slot.id+'" style="display:none" placeholder="Reason" autocomplete="off"><button class="m-save" data-id="'+slot.id+'">Save</button></div>';
+          html+='<div class="slot-actions" id="actions-'+slot.id+'"><button class="slot-log" id="logbtn-'+slot.id+'" data-id="'+slot.id+'">+ Log '+slot.name.toLowerCase()+'</button><button class="slot-skip" data-id="'+slot.id+'">Didn’t eat</button></div>';
+          html+='<div class="slot-form" id="skipwrap-'+slot.id+'" style="display:none"><input class="m-input" id="skipreason-'+slot.id+'" placeholder="Why didn’t you eat? (optional)" autocomplete="off"><button class="m-skipsave" data-id="'+slot.id+'">Confirm</button></div>';
         }
         card.innerHTML=html; list.appendChild(card);
       });
       list.querySelectorAll('.slot-log').forEach(b=>b.addEventListener('click',()=>openForm(b.dataset.id)));
-      list.querySelectorAll('.slot-skip').forEach(b=>b.addEventListener('click',()=>skip(b.dataset.id)));
+      list.querySelectorAll('.slot-skip').forEach(b=>b.addEventListener('click',()=>openSkip(b.dataset.id)));
+      list.querySelectorAll('.m-skipsave').forEach(b=>b.addEventListener('click',()=>skipDo(b.dataset.id)));
       list.querySelectorAll('.slot-edit').forEach(b=>b.addEventListener('click',()=>{ const lg=loadLog(); delete lg[b.dataset.id]; saveLog(lg); render(); }));
       list.querySelectorAll('.m-save').forEach(b=>b.addEventListener('click',()=>save(b.dataset.id)));
-      list.querySelectorAll('.m-input').forEach(inp=>inp.addEventListener('keydown',e=>{ if(e.key==='Enter') save(inp.id.replace('food-','')); }));
+      list.querySelectorAll('.m-input').forEach(inp=>inp.addEventListener('keydown',e=>{ if(e.key!=='Enter')return; if(inp.id.indexOf('food-')===0||inp.id.indexOf('reason-')===0) save(inp.id.replace(/^(food|reason)-/,'')); else if(inp.id.indexOf('skipreason-')===0) skipDo(inp.id.replace('skipreason-','')); }));
     }
     function openForm(id){ const f=$('form-'+id), b=$('logbtn-'+id); if(f){ f.style.display='flex'; if(b&&b.parentElement) b.parentElement.style.display='none'; const fi=$('food-'+id); if(fi)fi.focus(); } }
 
-    async function appendMeal(slot, food, actualDisp, tag){
+    async function appendMeal(slot, food, actualDisp, tag, reason){
       const sid = await Sheets.ensureSheet();
-      await Sheets.appendRow(sid,'Meals',[ymd(new Date()), slot.name, fmt12(slot.h,slot.m), food, actualDisp, tag]);
+      await Sheets.appendRow(sid,'Meals',[ymd(new Date()), slot.name, fmt12(slot.h,slot.m), food, actualDisp, tag, reason || '']);
       showSheetLink(sid);
     }
     function scopeMsg(e){ const m=(e&&e.message)||String(e); return /PERMISSION_DENIED|403|insufficient|scope|not connected|not defined/i.test(m) ? 'Logged here. Connect/reconnect Fitbit above to sync meals to Google Sheets.' : ('Logged here, sheet sync failed: '+m); }
 
     async function save(id){
-      const slot=SLOTS.find(s=>s.id===id); const fi=$('food-'+id), ti=$('time-'+id);
+      const slot=SLOTS.find(s=>s.id===id); const fi=$('food-'+id), ti=$('time-'+id), ri=$('reason-'+id);
       const food=(fi.value||'').trim(); const hhmm=ti.value||hhmmNow();
       if(!food){ fi.focus(); return; }
       const t=timing(slot.h,slot.m,hhmm); const p=hhmm.split(':'); const actualDisp=fmt12(+p[0],+p[1]);
-      const log=loadLog(); log[id]={food,actual:hhmm,actualDisp,tag:t.tag,cls:t.cls}; saveLog(log); render();
-      try { setStatus('Saving to your sheet…'); await appendMeal(slot, food, actualDisp, t.tag); setStatus('Saved ✓'); setTimeout(()=>setStatus(''),1500); }
+      const dmin=Math.abs(((+p[0])*60+(+p[1]))-(slot.h*60+slot.m));
+      // 60+ min off schedule → ask for a reason before saving
+      if(dmin>=60 && ri && ri.style.display==='none'){ ri.style.display=''; ri.placeholder='Why so '+(t.cls==='late'?'late':'early')+'? (added to your sheet)'; ri.focus(); return; }
+      const reason=ri?ri.value.trim():'';
+      const log=loadLog(); log[id]={food,actual:hhmm,actualDisp,tag:t.tag,cls:t.cls,reason}; saveLog(log); render();
+      try { setStatus('Saving to your sheet…'); await appendMeal(slot, food, actualDisp, t.tag, reason); setStatus('Saved ✓'); setTimeout(()=>setStatus(''),1500); }
       catch(e){ setStatus(scopeMsg(e)); }
     }
-    async function skip(id){
-      const slot=SLOTS.find(s=>s.id===id);
-      const log=loadLog(); log[id]={skipped:true}; saveLog(log); render();
-      try { setStatus('Saving…'); await appendMeal(slot, "(didn’t eat)", '', 'skipped'); setStatus('Saved ✓'); setTimeout(()=>setStatus(''),1500); }
+    function openSkip(id){ const a=$('actions-'+id), w=$('skipwrap-'+id); if(a)a.style.display='none'; if(w){ w.style.display='flex'; const r=$('skipreason-'+id); if(r)r.focus(); } }
+    async function skipDo(id){
+      const slot=SLOTS.find(s=>s.id===id); const r=$('skipreason-'+id); const reason=r?r.value.trim():'';
+      const log=loadLog(); log[id]={skipped:true,reason}; saveLog(log); render();
+      try { setStatus('Saving…'); await appendMeal(slot, "(didn’t eat)", '', 'skipped', reason); setStatus('Saved ✓'); setTimeout(()=>setStatus(''),1500); }
       catch(e){ setStatus(scopeMsg(e)); }
     }
 
@@ -1663,10 +1686,178 @@ main {
   });
   </script>
 
-  <div class="dash-links">
-    <a href="weight.html" class="dash-link">⚖️ Weight</a>
-    <a href="calendar.html" class="dash-link">📅 Calendar</a>
+  <style>
+  .w-row { display:flex; gap:10px; align-items:center; }
+  .w-input { flex:1; min-width:0; padding:16px; border:1px solid rgba(255,255,255,0.1); border-radius:12px; background:rgba(0,0,0,0.3); color:var(--text-primary); font-size:28px; font-weight:700; text-align:center; outline:none; font-variant-numeric:tabular-nums; font-family:var(--font-mono); }
+  .w-input:focus { border-color:rgba(255,255,255,0.3); }
+  .w-seg { display:inline-flex; border:1px solid rgba(255,255,255,0.1); border-radius:12px; overflow:hidden; flex-shrink:0; }
+  .w-seg button { border:0; background:transparent; color:var(--text-tertiary); font-family:inherit; font-size:15px; font-weight:700; padding:16px; cursor:pointer; }
+  .w-seg button.on { background:rgba(255,255,255,0.12); color:var(--text-primary); }
+  .w-note { width:100%; margin-top:10px; padding:12px; border:1px solid rgba(255,255,255,0.1); border-radius:11px; background:rgba(0,0,0,0.3); color:var(--text-primary); font-size:14px; outline:none; font-family:inherit; }
+  .w-log { width:100%; margin-top:12px; padding:14px; border:0; border-radius:12px; background:linear-gradient(180deg,#FFF,#E8E5DD); color:#0A0A0B; font-family:inherit; font-size:15px; font-weight:700; cursor:pointer; }
+  .w-recent { margin-top:12px; }
+  .w-rrow { display:flex; justify-content:space-between; align-items:baseline; padding:8px 2px; border-bottom:1px solid rgba(255,255,255,0.05); font-size:13px; }
+  .w-rrow:last-child { border-bottom:0; }
+  .w-rrow .v { color:var(--text-primary); font-weight:700; font-variant-numeric:tabular-nums; }
+  .w-rrow .d { color:var(--text-tertiary); font-family:var(--font-mono); font-size:12px; }
+  .cal-add { display:flex; gap:8px; flex-wrap:wrap; }
+  .cal-in { flex:1; min-width:150px; padding:12px; border:1px solid rgba(255,255,255,0.1); border-radius:11px; background:rgba(0,0,0,0.3); color:var(--text-primary); font-size:15px; outline:none; font-family:inherit; }
+  .cal-sel, .cal-dur, .cal-when { padding:12px; border:1px solid rgba(255,255,255,0.1); border-radius:11px; background:rgba(0,0,0,0.3); color:var(--text-primary); font-size:14px; font-family:inherit; }
+  .cal-add-btn { padding:12px 18px; border:0; border-radius:11px; background:linear-gradient(180deg,#FFF,#E8E5DD); color:#0A0A0B; font-weight:700; font-family:inherit; cursor:pointer; }
+  .day-head { font-size:11px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:var(--text-tertiary); margin:16px 0 8px; }
+  .evt { display:flex; gap:12px; align-items:baseline; padding:11px 14px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-left:2px solid #A78BFA; border-radius:10px; margin-bottom:8px; }
+  .evt-time { font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); min-width:74px; white-space:nowrap; }
+  .evt-title { font-size:15px; color:var(--text-primary); font-weight:600; }
+  .cal-empty { color:var(--text-tertiary); font-size:14px; padding:18px; text-align:center; }
+  .wgate { position:fixed; inset:0; z-index:200; background:rgba(5,5,6,0.94); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); display:flex; align-items:center; justify-content:center; padding:24px; }
+  .wgate-box { width:100%; max-width:380px; background:#0e0e10; border:1px solid rgba(255,255,255,0.08); border-radius:18px; padding:24px; text-align:center; box-shadow:0 24px 70px rgba(0,0,0,0.6); }
+  .wgate-box h2 { font-size:20px; color:var(--text-primary); margin:0 0 6px; }
+  .wgate-box p { font-size:13px; color:var(--text-tertiary); margin:0 0 18px; }
+  </style>
+
+  <div class="gm-section">
+    <div class="gm-eyebrow" style="margin-bottom:10px">Weight</div>
+    <div class="gm-card">
+      <div class="w-row">
+        <input class="w-input" id="wVal" type="number" inputmode="decimal" step="0.1" placeholder="0.0">
+        <div class="w-seg" id="wUnitSeg"><button type="button" data-u="lb" class="on">lb</button><button type="button" data-u="kg">kg</button></div>
+      </div>
+      <input class="w-note" id="wNote" type="text" placeholder="Note (optional)" autocomplete="off">
+      <button class="w-log" id="wLogBtn" type="button">Log weight</button>
+      <div id="wStatus" style="text-align:center;font-size:12px;color:var(--text-secondary);min-height:16px;margin-top:8px"></div>
+      <div class="w-recent" id="wRecent"></div>
+    </div>
   </div>
+
+  <div class="gm-section">
+    <div class="gm-eyebrow" style="margin-bottom:10px">Calendar</div>
+    <div class="gm-card">
+      <div class="cal-add">
+        <input class="cal-in" id="calTitle" type="text" placeholder="Add an event&hellip;" autocomplete="off">
+        <input class="cal-when" id="calWhen" type="datetime-local">
+        <select class="cal-dur" id="calDur"><option value="15">15m</option><option value="30">30m</option><option value="60" selected>1h</option><option value="90">1.5h</option><option value="120">2h</option></select>
+        <select class="cal-sel" id="calSel"><option value="primary">Primary</option></select>
+        <button class="cal-add-btn" id="calAddBtn" type="button">+ Add</button>
+      </div>
+      <div id="calStatus" style="text-align:center;font-size:12px;color:var(--text-secondary);min-height:16px;margin-top:8px"></div>
+      <div id="calEvents"><div class="cal-empty">Loading&hellip;</div></div>
+    </div>
+  </div>
+
+  <div class="wgate" id="weightGate" style="display:none">
+    <div class="wgate-box">
+      <h2>Morning weigh-in</h2>
+      <p>Log your weight to start the day.</p>
+      <div class="w-row">
+        <input class="w-input" id="gateVal" type="number" inputmode="decimal" step="0.1" placeholder="0.0">
+        <div class="w-seg" id="gateUnitSeg"><button type="button" data-u="lb" class="on">lb</button><button type="button" data-u="kg">kg</button></div>
+      </div>
+      <button class="w-log" id="gateBtn" type="button">Log &amp; continue</button>
+      <div id="gateStatus" style="text-align:center;font-size:12px;color:var(--text-secondary);min-height:16px;margin-top:8px"></div>
+    </div>
+  </div>
+  <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    'use strict';
+    const $ = (id) => document.getElementById(id);
+    function ymd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+    function escapeHtml(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    function time12(){ return new Date().toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); }
+
+    // ---------- WEIGHT ----------
+    let wUnit='lb';
+    try { const s=localStorage.getItem('dash_weight_unit'); if(s==='kg'||s==='lb')wUnit=s; else { const w=JSON.parse(localStorage.getItem('po_water_v1')); if(w&&w.weightUnit)wUnit=w.weightUnit==='kg'?'kg':'lb'; } } catch {}
+    function setUnit(seg,u){ wUnit=u; try{localStorage.setItem('dash_weight_unit',u);}catch{} document.querySelectorAll('#'+seg+' button').forEach(b=>b.classList.toggle('on',b.dataset.u===u)); }
+
+    async function logWeight(val, note){
+      try { localStorage.setItem('weight:lastdate', ymd(new Date())); } catch {}
+      const id = await Sheets.ensureSheet();
+      await Sheets.appendRow(id,'Weight',[ymd(new Date()), time12(), String(val), wUnit, note||'']);
+      return id;
+    }
+    function renderRecent(rows){
+      const data=(rows||[]).slice(1).filter(r=>r&&r.length); if(!data.length) return;
+      $('wRecent').innerHTML = data.slice(-6).reverse().map(r=>'<div class="w-rrow"><span class="d">'+escapeHtml(r[0]||'')+'</span><span class="v">'+escapeHtml(r[2]||'')+' '+escapeHtml(r[3]||'')+'</span></div>').join('');
+    }
+    async function loadRecent(){ try { const id=await Sheets.loadId(); if(!id)return; const rows=await Sheets.readRows(id,'Weight'); renderRecent(rows); } catch(e){} }
+
+    async function doWeight(valEl, statusEl, note, onDone){
+      const v=parseFloat(valEl.value); if(!(v>0)){ valEl.focus(); return; }
+      statusEl.textContent='Saving…';
+      try { await logWeight(v, note); statusEl.textContent='Saved ✓'; if(onDone)onDone(); loadRecent(); }
+      catch(e){ try{localStorage.setItem('weight:lastdate',ymd(new Date()));}catch{} statusEl.textContent=/PERMISSION_DENIED|403|scope|not connected|not defined/i.test((e&&e.message)||'')?'Logged. Reconnect Fitbit above to sync to Sheets.':'Logged locally; sheet failed.'; if(onDone)onDone(); }
+    }
+
+    setUnit('wUnitSeg', wUnit);
+    document.querySelectorAll('#wUnitSeg button').forEach(b=>b.addEventListener('click',()=>setUnit('wUnitSeg',b.dataset.u)));
+    $('wLogBtn').addEventListener('click',()=>doWeight($('wVal'),$('wStatus'),$('wNote').value,()=>{ $('wVal').value=''; $('wNote').value=''; setTimeout(()=>{$('wStatus').textContent='';},1500); }));
+    $('wVal').addEventListener('keydown',e=>{ if(e.key==='Enter') $('wLogBtn').click(); });
+    loadRecent();
+
+    // ---------- DAILY WEIGHT GATE ----------
+    (function(){
+      let last=''; try{ last=localStorage.getItem('weight:lastdate')||''; }catch{}
+      if(last===ymd(new Date())) return;
+      const gate=$('weightGate'); gate.style.display='flex'; document.body.style.overflow='hidden';
+      setUnit('gateUnitSeg', wUnit);
+      document.querySelectorAll('#gateUnitSeg button').forEach(b=>b.addEventListener('click',()=>setUnit('gateUnitSeg',b.dataset.u)));
+      $('gateBtn').addEventListener('click',()=>doWeight($('gateVal'),$('gateStatus'),'',()=>{ gate.style.display='none'; document.body.style.overflow=''; }));
+      $('gateVal').addEventListener('keydown',e=>{ if(e.key==='Enter') $('gateBtn').click(); });
+      setTimeout(()=>{ try{ $('gateVal').focus(); }catch{} }, 200);
+    })();
+
+    // ---------- CALENDAR ----------
+    const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    function pad(n){ return String(n).padStart(2,'0'); }
+    function localInput(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes()); }
+    function calUrl(id){ return 'https://www.googleapis.com/calendar/v3/calendars/'+encodeURIComponent(id)+'/events'; }
+
+    async function loadCalendars(){
+      try {
+        const r = await GoogleAPI.gfetch('https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=writer&fields=items(id,summary,primary)', {});
+        if(!r.ok) return; const j=await r.json(); const items=(j.items||[]); if(!items.length) return;
+        items.sort((a,b)=>(b.primary?1:0)-(a.primary?1:0));
+        const sel=$('calSel'); sel.innerHTML='';
+        items.forEach(c=>{ const o=document.createElement('option'); o.value=c.id; o.textContent=(c.summary||c.id)+(c.primary?' (primary)':''); sel.appendChild(o); });
+      } catch(e){ /* keep default Primary */ }
+    }
+    function renderEvents(items){
+      const box=$('calEvents'); if(!items.length){ box.innerHTML='<div class="cal-empty">Nothing in the next two weeks. 🎉</div>'; return; }
+      let html='', lastDay='';
+      items.forEach(ev=>{ const allDay=!!(ev.start&&ev.start.date&&!ev.start.dateTime); const start=new Date((ev.start&&(ev.start.dateTime||ev.start.date))||Date.now());
+        const day=start.toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'}); if(day!==lastDay){ html+='<div class="day-head">'+day+'</div>'; lastDay=day; }
+        const tm=allDay?'All day':start.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+        html+='<div class="evt"><span class="evt-time">'+tm+'</span><span class="evt-title">'+escapeHtml(ev.summary||'(no title)')+'</span></div>'; });
+      box.innerHTML=html;
+    }
+    async function loadEvents(){
+      const box=$('calEvents');
+      try {
+        const timeMin=new Date().toISOString(), timeMax=new Date(Date.now()+14*864e5).toISOString();
+        const r=await GoogleAPI.gfetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=40&timeMin='+encodeURIComponent(timeMin)+'&timeMax='+encodeURIComponent(timeMax),{});
+        if(!r.ok){ box.innerHTML='<div class="cal-empty">'+(r.status===403?'Reconnect above to grant Calendar access.':'Could not load events ('+r.status+').')+'</div>'; return; }
+        const j=await r.json(); renderEvents(j.items||[]);
+      } catch(e){ box.innerHTML='<div class="cal-empty">'+(e.message==='not connected'?'Connect Fitbit above to see your calendar.':'Error: '+e.message)+'</div>'; }
+    }
+    async function addEvent(){
+      const title=($('calTitle').value||'').trim(); const whenVal=$('calWhen').value;
+      if(!title){ $('calTitle').focus(); return; } if(!whenVal){ $('calWhen').focus(); return; }
+      const start=new Date(whenVal); const dur=parseInt($('calDur').value,10)||60; const end=new Date(start.getTime()+dur*60000);
+      const calId=$('calSel').value||'primary'; const btn=$('calAddBtn'); btn.disabled=true;
+      try {
+        $('calStatus').textContent='Adding…';
+        const r=await GoogleAPI.gfetch(calUrl(calId),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({summary:title,start:{dateTime:start.toISOString(),timeZone:TZ},end:{dateTime:end.toISOString(),timeZone:TZ}})});
+        if(!r.ok){ $('calStatus').textContent=r.status===403?'Reconnect above to grant Calendar access.':'Add failed ('+r.status+').'; return; }
+        $('calStatus').textContent='Added ✓'; $('calTitle').value=''; loadEvents(); setTimeout(()=>{$('calStatus').textContent='';},1500);
+      } catch(e){ $('calStatus').textContent='Error: '+e.message; } finally { btn.disabled=false; }
+    }
+    const def=new Date(); def.setHours(def.getHours()+1,0,0,0); $('calWhen').value=localInput(def);
+    $('calAddBtn').addEventListener('click',addEvent);
+    $('calTitle').addEventListener('keydown',e=>{ if(e.key==='Enter') addEvent(); });
+    if(window.GoogleAPI && GoogleAPI.isConnected()){ loadCalendars(); loadEvents(); }
+    else { $('calEvents').innerHTML='<div class="cal-empty">Connect Fitbit above to see your calendar.</div>'; }
+  });
+  </script>
 
   <div class="attribution">// editable template · all data stays in your browser</div>
 </main>
