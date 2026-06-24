@@ -943,7 +943,7 @@ main {
         <div id="fbBio" class="wh-bio" style="display:none">
           <div class="wh-bio-item"><span class="wh-zone" id="fbZoneSkin"></span><span class="wh-bio-label">Skin temp &Delta;</span><span class="wh-bio-val" id="fbSkin">&mdash;</span></div>
           <div class="wh-bio-item"><span class="wh-zone" id="fbZoneSpo2"></span><span class="wh-bio-label">Blood O&#8322;</span><span class="wh-bio-val" id="fbSpo2">&mdash;</span></div>
-          <div class="wh-bio-item"><span class="wh-zone" id="fbZoneResp"></span><span class="wh-bio-label">Resp rate</span><span class="wh-bio-val" id="fbResp">&mdash;</span></div>
+          <div class="wh-bio-item"><span class="wh-zone" id="fbZoneResp"></span><span class="wh-bio-label">BRPM</span><span class="wh-bio-val" id="fbResp">&mdash;</span></div>
         </div>
         <div class="wh-legend">
           <span class="wh-leg-item"><span class="wh-zone z-good"></span>Good</span>
@@ -951,12 +951,9 @@ main {
           <span class="wh-leg-item"><span class="wh-zone z-warn"></span>Watch</span>
           <span class="wh-leg-item"><span class="wh-zone z-bad"></span>High / Low</span>
         </div>
-        <div id="fbVerdict" class="wh-verdict" style="display:none">
-          <div class="wh-verdict-head"><span class="wh-verdict-eye">Today's call</span><span id="fbVerdictBadge" class="wh-verdict-badge"></span></div>
-          <div id="fbVerdictHead" class="wh-verdict-headline"></div>
-          <div id="fbVerdictReasons" class="wh-verdict-reasons"></div>
-        </div>
+        <!-- (Today's call removed) -->
         <div class="wh-disc-sub" style="text-align:center; margin:14px auto 0; max-width:340px;">Readiness is an estimate from your HRV, resting heart rate &amp; sleep &mdash; not an official Fitbit score.</div>
+        <pre id="fbDebug" style="display:none; white-space:pre-wrap; word-break:break-word; font-size:10px; line-height:1.45; color:#9ab; background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:10px; margin-top:14px; max-height:340px; overflow:auto;"></pre>
         <button id="fbDisconnectBtn" class="wh-disconnect-link" type="button">Disconnect</button>
       </div>
     </div>
@@ -976,6 +973,7 @@ main {
       'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly'
     ].join(' ');
     const DEBUG = true; // logs raw Google Health responses to the browser console
+    const DEBUG_PANEL = /fbdebug/i.test(location.hash) || /fbdebug/i.test(location.search); // on-screen raw dump for tuning
 
     const $ = (id) => document.getElementById(id);
     const errEl = () => $('fbErr');
@@ -1167,7 +1165,7 @@ main {
       $('fbBarDeep').style.width  = (100 * s.deep / total) + '%';
       $('fbBarLight').style.width = (100 * s.light / total) + '%';
       $('fbBarAwake').style.width = (100 * s.awake / total) + '%';
-      $('fbStagesMeta').textContent = fmtMins(total) + ' total';
+      $('fbStagesMeta').textContent = fmtMins(total) + ' in bed';
       $('fbRem').textContent   = fmtMinsShort(s.rem);
       $('fbDeep').textContent  = fmtMinsShort(s.deep);
       $('fbLight').textContent = fmtMinsShort(s.light);
@@ -1208,7 +1206,7 @@ main {
 
         renderRing(readiness(hrvS, rhrS, sleepHours));
 
-        if (sleepHours != null) { $('fbSleep').textContent = sleepHours.toFixed(1) + 'h'; $('fbSleepSub').textContent = 'last night'; zone($('fbZoneSleep'), sleepHoursZone(sleepHours)); }
+        if (sleepHours != null) { $('fbSleep').textContent = sleepHours.toFixed(1) + 'h'; $('fbSleepSub').textContent = 'asleep'; zone($('fbZoneSleep'), sleepHoursZone(sleepHours)); }
         if (steps != null) { $('fbSteps').textContent = steps >= 1000 ? (steps / 1000).toFixed(steps >= 10000 ? 0 : 1) + 'k' : String(steps); zone($('fbZoneSteps'), stepsZone(steps)); }
         if (hrv != null) { $('fbHrv').textContent = String(hrv); zone($('fbZoneHrv'), hrvZone(hrv)); }
         if (rhr != null) { $('fbRhr').textContent = String(rhr); zone($('fbZoneRhr'), rhrZone(rhr)); }
@@ -1216,25 +1214,23 @@ main {
         const anyBio = (skin != null) || (spo2 != null) || (resp != null);
         if (anyBio) {
           $('fbBio').style.display = '';
-          if (skin != null) $('fbSkin').textContent = (skin > 0 ? '+' : '') + Number(skin).toFixed(2) + '°C';
+          if (skin != null) $('fbSkin').textContent = (skin > 0 ? '+' : '') + (Number(skin) * 1.8).toFixed(2) + '°F';
           if (spo2 != null) { $('fbSpo2').textContent = Number(spo2).toFixed(0) + '%'; zone($('fbZoneSpo2'), spo2Zone(spo2)); }
-          if (resp != null) { $('fbResp').textContent = Number(resp).toFixed(1) + ' br/min'; zone($('fbZoneResp'), respZone(Number(resp))); }
+          if (resp != null) { $('fbResp').textContent = Number(resp).toFixed(1); zone($('fbZoneResp'), respZone(Number(resp))); }
         }
 
-        const rec = readiness(hrvS, rhrS, sleepHours);
-        const v = verdict(rec);
-        if (v) {
-          $('fbVerdict').style.display = '';
-          const b = $('fbVerdictBadge'); b.textContent = v.badge; b.className = 'wh-verdict-badge ' + v.cls;
-          $('fbVerdictHead').textContent = v.headline;
-          const reasons = [];
-          if (sleepHours != null) reasons.push((sleepHours >= 7 ? '✓' : '·') + ' Slept ' + sleepHours.toFixed(1) + 'h — ' + (sleepHours >= 7 ? 'solid recovery window.' : 'short sleep.'));
-          if (hrv != null && hrvS.length >= 2) { const base = median(hrvS.slice(0, -1).map(x => x.v)); reasons.push((base && hrv >= base ? '✓' : '·') + ' HRV ' + hrv + 'ms — ' + (base ? (hrv >= base ? 'at/above your baseline.' : 'below your baseline.') : 'tracking.')); }
-          if (rhr != null && rhrS.length >= 2) { const base = median(rhrS.slice(0, -1).map(x => x.v)); reasons.push((base && rhr <= base ? '✓' : '·') + ' RHR ' + rhr + 'bpm — ' + (base ? (rhr <= base ? 'at/below baseline.' : 'elevated vs baseline.') : 'tracking.')); }
-          if (steps != null) reasons.push((steps >= 8000 ? '✓' : '·') + ' ' + steps.toLocaleString() + ' steps today.');
-          $('fbVerdictReasons').innerHTML = reasons.join('<br>');
-        }
+        // (Today's call / verdict removed)
 
+        if (DEBUG_PANEL) {
+          const sample = (arr) => (arr && arr.length ? arr[0] : null);
+          const dbg = $('fbDebug'); dbg.style.display = '';
+          dbg.textContent = JSON.stringify({
+            counts: { hrv: hrvDps.length, rhr: rhrDps.length, spo2: spo2Dps.length, resp: respDps.length, temp: tempDps.length, steps: stepsDps.length, sleep: sleepDps.length },
+            parsed: { hrv, rhr, spo2, resp, skin, steps, sleepHours },
+            hrv_sample: sample(hrvDps), rhr_sample: sample(rhrDps), spo2_sample: sample(spo2Dps),
+            resp_sample: sample(respDps), temp_sample: sample(tempDps), steps_sample: sample(stepsDps), sleep_sample: sample(sleepDps)
+          }, null, 2);
+        }
         $('fbUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
       } catch (e) { showErr(e.message || String(e)); }
     }
@@ -1248,6 +1244,7 @@ main {
   })();
   </script>
 
+  <div style="display:none"><!-- Daily Stack removed (hidden) -->
   <div class="section-title">Daily Stack</div>
 
   <div class="stack-card">
@@ -1289,6 +1286,7 @@ main {
       </div>
     </div>
   </div>
+  </div><!-- /Daily Stack hidden -->
 
   <section id="water" class="water-embed">
     <div class="section-title">Water Tracker</div>
