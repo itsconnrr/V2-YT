@@ -1597,7 +1597,7 @@ main {
   <div class="meal-section">
     <div class="gm-eyebrow" style="margin-bottom:10px">Meals &mdash; <span id="mealsDate">today</span></div>
     <div id="mealSlots"></div>
-    <a id="mealsSheetLink" class="dash-link" target="_blank" rel="noopener" style="display:none; margin-top:8px">📄 Meal history in Google Sheets →</a>
+    <!-- (sheet link moved to the "Tracked History" footer) -->
     <div id="mealsStatus" style="text-align:center;font-size:12px;color:var(--text-secondary);min-height:16px;margin-top:8px"></div>
   </div>
   <script>
@@ -1623,7 +1623,7 @@ main {
     function escapeHtml(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
     function timing(sh,sm,hhmm){ const p=hhmm.split(':'); const act=(+p[0])*60+(+p[1]); const sch=sh*60+sm; const d=act-sch; if(Math.abs(d)<=15)return{tag:'on time',cls:'ok'}; const mins=Math.abs(d),h=Math.floor(mins/60),mm=mins%60; const str=(h>0?h+'h ':'')+mm+'m'; return d>0?{tag:'+'+str+' late',cls:'late'}:{tag:str+' early',cls:'early'}; }
     function setStatus(m){ const e=$('mealsStatus'); if(e) e.textContent=m||''; }
-    function showSheetLink(id){ const a=$('mealsSheetLink'); if(a){ a.href = window.Sheets ? Sheets.link(id) : '#'; a.style.display='inline-flex'; } }
+    function showSheetLink(id){ const a=document.getElementById('trackedHistory'); if(a&&id){ a.href = window.Sheets ? Sheets.link(id) : ('https://docs.google.com/spreadsheets/d/'+id); } }
 
     function render(){
       $('mealsDate').textContent = new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
@@ -1653,10 +1653,24 @@ main {
     }
     function openForm(id){ const f=$('form-'+id), b=$('logbtn-'+id); if(f){ f.style.display='flex'; if(b&&b.parentElement) b.parentElement.style.display='none'; const fi=$('food-'+id); if(fi)fi.focus(); } }
 
-    async function appendMeal(slot, food, actualDisp, tag, reason){
-      const sid = await Sheets.ensureSheet();
-      await Sheets.appendRow(sid,'Meals',[ymd(new Date()), slot.name, fmt12(slot.h,slot.m), food, actualDisp, tag, reason || '']);
-      showSheetLink(sid);
+    // Each day gets a 6-slot block inserted at the top (newest day first), pre-filled
+    // with Date / Meal Type / Ideal Time; logging fills in that slot's row.
+    async function ensureDayBlock(){
+      const flag='meals:block:'+ymd(new Date());
+      if(localStorage.getItem(flag)) return;
+      const id=await Sheets.ensureSheet();
+      try { const rows=await Sheets.readRows(id,'Meals'); if(rows[1] && rows[1][0]===ymd(new Date())){ localStorage.setItem(flag,'1'); return; } } catch(e){}
+      const block = SLOTS.map((s,i)=> [ i===0?ymd(new Date()):'', s.name, fmt12(s.h,s.m), '', '', '', '' ]);
+      await Sheets.insertRowsTop(id,'Meals', block);
+      localStorage.setItem(flag,'1');
+    }
+    async function writeMeal(slotId, food, time, late, reason){
+      const i=SLOTS.findIndex(s=>s.id===slotId);
+      const id=await Sheets.ensureSheet();
+      await ensureDayBlock();                 // today's block sits at rows 2..7
+      const row=2+i;
+      await Sheets.updateRange(id, 'Meals!D'+row+':G'+row, [[food, time, late, reason||'']]);
+      showSheetLink(id);
     }
     function scopeMsg(e){ const m=(e&&e.message)||String(e); return /PERMISSION_DENIED|403|insufficient|scope|not connected|not defined/i.test(m) ? 'Logged here. Connect/reconnect Fitbit above to sync meals to Google Sheets.' : ('Logged here, sheet sync failed: '+m); }
 
@@ -1670,18 +1684,19 @@ main {
       if(dmin>=60 && ri && ri.style.display==='none'){ ri.style.display=''; ri.placeholder='Why so '+(t.cls==='late'?'late':'early')+'? (added to your sheet)'; ri.focus(); return; }
       const reason=ri?ri.value.trim():'';
       const log=loadLog(); log[id]={food,actual:hhmm,actualDisp,tag:t.tag,cls:t.cls,reason}; saveLog(log); render();
-      try { setStatus('Saving to your sheet…'); await appendMeal(slot, food, actualDisp, t.tag, reason); setStatus('Saved ✓'); setTimeout(()=>setStatus(''),1500); }
+      try { setStatus('Saving to your sheet…'); await writeMeal(id, food, actualDisp, t.tag, reason); setStatus('Saved ✓'); setTimeout(()=>setStatus(''),1500); }
       catch(e){ setStatus(scopeMsg(e)); }
     }
     function openSkip(id){ const a=$('actions-'+id), w=$('skipwrap-'+id); if(a)a.style.display='none'; if(w){ w.style.display='flex'; const r=$('skipreason-'+id); if(r)r.focus(); } }
     async function skipDo(id){
       const slot=SLOTS.find(s=>s.id===id); const r=$('skipreason-'+id); const reason=r?r.value.trim():'';
       const log=loadLog(); log[id]={skipped:true,reason}; saveLog(log); render();
-      try { setStatus('Saving…'); await appendMeal(slot, "(didn’t eat)", '', 'skipped', reason); setStatus('Saved ✓'); setTimeout(()=>setStatus(''),1500); }
+      try { setStatus('Saving…'); await writeMeal(id, "(didn’t eat)", 'N/A', 'skipped', reason); setStatus('Saved ✓'); setTimeout(()=>setStatus(''),1500); }
       catch(e){ setStatus(scopeMsg(e)); }
     }
 
     render();
+    if (window.GoogleAPI && GoogleAPI.isConnected()) ensureDayBlock().catch(()=>{});
     if (window.Sheets) Sheets.loadId().then(id=>{ if(id) showSheetLink(id); }).catch(()=>{});
   });
   </script>
@@ -1713,18 +1728,17 @@ main {
   .wgate-box { width:100%; max-width:380px; background:#0e0e10; border:1px solid rgba(255,255,255,0.08); border-radius:18px; padding:24px; text-align:center; box-shadow:0 24px 70px rgba(0,0,0,0.6); }
   .wgate-box h2 { font-size:20px; color:var(--text-primary); margin:0 0 6px; }
   .wgate-box p { font-size:13px; color:var(--text-tertiary); margin:0 0 18px; }
+  .w-unit { font-size:18px; font-weight:700; color:var(--text-secondary); padding:0 8px; }
+  .w-down { color:#6BE3A4; }
+  .w-up { color:#E0764D; }
+  .dash-footer { text-align:center; margin-top:42px; padding-top:20px; border-top:1px solid rgba(255,255,255,0.06); }
+  .dash-footer a { color:var(--text-tertiary); text-decoration:none; font-size:13px; font-weight:600; letter-spacing:0.04em; }
+  .dash-footer a:hover { color:var(--text-primary); }
   </style>
 
   <div class="gm-section">
-    <div class="gm-eyebrow" style="margin-bottom:10px">Weight</div>
+    <div class="gm-eyebrow" style="margin-bottom:10px">Weight &mdash; past 7 days</div>
     <div class="gm-card">
-      <div class="w-row">
-        <input class="w-input" id="wVal" type="number" inputmode="decimal" step="0.1" placeholder="0.0">
-        <div class="w-seg" id="wUnitSeg"><button type="button" data-u="lb" class="on">lb</button><button type="button" data-u="kg">kg</button></div>
-      </div>
-      <input class="w-note" id="wNote" type="text" placeholder="Note (optional)" autocomplete="off">
-      <button class="w-log" id="wLogBtn" type="button">Log weight</button>
-      <div id="wStatus" style="text-align:center;font-size:12px;color:var(--text-secondary);min-height:16px;margin-top:8px"></div>
       <div class="w-recent" id="wRecent"></div>
     </div>
   </div>
@@ -1747,10 +1761,10 @@ main {
   <div class="wgate" id="weightGate" style="display:none">
     <div class="wgate-box">
       <h2>Morning weigh-in</h2>
-      <p>Log your weight to start the day.</p>
+      <p>Log your weight (lb) to start the day.</p>
       <div class="w-row">
         <input class="w-input" id="gateVal" type="number" inputmode="decimal" step="0.1" placeholder="0.0">
-        <div class="w-seg" id="gateUnitSeg"><button type="button" data-u="lb" class="on">lb</button><button type="button" data-u="kg">kg</button></div>
+        <span class="w-unit">lb</span>
       </div>
       <button class="w-log" id="gateBtn" type="button">Log &amp; continue</button>
       <div id="gateStatus" style="text-align:center;font-size:12px;color:var(--text-secondary);min-height:16px;margin-top:8px"></div>
@@ -1764,44 +1778,48 @@ main {
     function escapeHtml(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
     function time12(){ return new Date().toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); }
 
-    // ---------- WEIGHT ----------
-    let wUnit='lb';
-    try { const s=localStorage.getItem('dash_weight_unit'); if(s==='kg'||s==='lb')wUnit=s; else { const w=JSON.parse(localStorage.getItem('po_water_v1')); if(w&&w.weightUnit)wUnit=w.weightUnit==='kg'?'kg':'lb'; } } catch {}
-    function setUnit(seg,u){ wUnit=u; try{localStorage.setItem('dash_weight_unit',u);}catch{} document.querySelectorAll('#'+seg+' button').forEach(b=>b.classList.toggle('on',b.dataset.u===u)); }
+    // ---------- WEIGHT (lb only; logged once each morning; history kept locally) ----------
+    function loadWLog(){ try { return JSON.parse(localStorage.getItem('weight:log'))||[]; } catch { return []; } }
+    function saveWLog(a){ try { localStorage.setItem('weight:log', JSON.stringify(a)); } catch {} }
+    function setFooter(id){ const a=$('trackedHistory'); if(a&&id){ a.href = window.Sheets ? Sheets.link(id) : ('https://docs.google.com/spreadsheets/d/'+id); } }
 
-    async function logWeight(val, note){
-      try { localStorage.setItem('weight:lastdate', ymd(new Date())); } catch {}
-      const id = await Sheets.ensureSheet();
-      await Sheets.appendRow(id,'Weight',[ymd(new Date()), time12(), String(val), wUnit, note||'']);
-      return id;
+    function renderHistory(){
+      const box=$('wRecent'); if(!box) return;
+      const cutoff = ymd(new Date(Date.now()-7*864e5));
+      const week = loadWLog().slice().sort((x,y)=> x.d<y.d?1:(x.d>y.d?-1:0)).filter(e=> e.d >= cutoff);
+      if(!week.length){ box.innerHTML='<div class="cal-empty">No weigh-ins yet &mdash; logged each morning.</div>'; return; }
+      box.innerHTML = week.map((e,i)=>{
+        const older=week[i+1]; let trend='';
+        if(older){ const d=Math.round((e.lb-older.lb)*10)/10; if(d<0) trend=' <span class="w-down">▼ '+Math.abs(d)+'</span>'; else if(d>0) trend=' <span class="w-up">▲ '+d+'</span>'; }
+        return '<div class="w-rrow"><span class="d">'+escapeHtml(e.d)+'</span><span class="v">'+escapeHtml(String(e.lb))+' lb'+trend+'</span></div>';
+      }).join('');
     }
-    function renderRecent(rows){
-      const data=(rows||[]).slice(1).filter(r=>r&&r.length); if(!data.length) return;
-      $('wRecent').innerHTML = data.slice(-6).reverse().map(r=>'<div class="w-rrow"><span class="d">'+escapeHtml(r[0]||'')+'</span><span class="v">'+escapeHtml(r[2]||'')+' '+escapeHtml(r[3]||'')+'</span></div>').join('');
-    }
-    async function loadRecent(){ try { const id=await Sheets.loadId(); if(!id)return; const rows=await Sheets.readRows(id,'Weight'); renderRecent(rows); } catch(e){} }
 
-    async function doWeight(valEl, statusEl, note, onDone){
+    async function doWeight(valEl, statusEl, onDone){
       const v=parseFloat(valEl.value); if(!(v>0)){ valEl.focus(); return; }
       statusEl.textContent='Saving…';
-      try { await logWeight(v, note); statusEl.textContent='Saved ✓'; if(onDone)onDone(); loadRecent(); }
-      catch(e){ try{localStorage.setItem('weight:lastdate',ymd(new Date()));}catch{} statusEl.textContent=/PERMISSION_DENIED|403|scope|not connected|not defined/i.test((e&&e.message)||'')?'Logged. Reconnect Fitbit above to sync to Sheets.':'Logged locally; sheet failed.'; if(onDone)onDone(); }
+      try { localStorage.setItem('weight:lastdate', ymd(new Date())); } catch {}
+      const log=loadWLog(); const prev=log.length?log[log.length-1]:null;
+      log.push({ d:ymd(new Date()), t:time12(), lb:v, note:'' }); saveWLog(log); // local first (offline-safe)
+      renderHistory();
+      try {
+        const id=await Sheets.ensureSheet();
+        let cell=String(v);
+        if(prev){ const d=Math.round((v-prev.lb)*10)/10; if(d<0) cell=v+' ▼ '+Math.abs(d); else if(d>0) cell=v+' ▲ '+d; }
+        await Sheets.insertRowsTop(id,'Weight', [[ ymd(new Date()), time12(), cell, '' ]]);
+        setFooter(id); statusEl.textContent='Saved ✓'; if(onDone)onDone(); }
+      catch(e){ statusEl.textContent=/PERMISSION_DENIED|403|scope|not connected|not defined/i.test((e&&e.message)||'')?'Logged locally. Reconnect Fitbit to sync.':'Logged locally.'; if(onDone)onDone(); }
     }
 
-    setUnit('wUnitSeg', wUnit);
-    document.querySelectorAll('#wUnitSeg button').forEach(b=>b.addEventListener('click',()=>setUnit('wUnitSeg',b.dataset.u)));
-    $('wLogBtn').addEventListener('click',()=>doWeight($('wVal'),$('wStatus'),$('wNote').value,()=>{ $('wVal').value=''; $('wNote').value=''; setTimeout(()=>{$('wStatus').textContent='';},1500); }));
-    $('wVal').addEventListener('keydown',e=>{ if(e.key==='Enter') $('wLogBtn').click(); });
-    loadRecent();
+    renderHistory();
+    if(window.Sheets) Sheets.loadId().then(id=>{ if(id) setFooter(id); }).catch(()=>{});
 
-    // ---------- DAILY WEIGHT GATE ----------
+    // ---------- DAILY WEIGHT GATE (the only way to log weight) ----------
     (function(){
       let last=''; try{ last=localStorage.getItem('weight:lastdate')||''; }catch{}
       if(last===ymd(new Date())) return;
       const gate=$('weightGate'); gate.style.display='flex'; document.body.style.overflow='hidden';
-      setUnit('gateUnitSeg', wUnit);
-      document.querySelectorAll('#gateUnitSeg button').forEach(b=>b.addEventListener('click',()=>setUnit('gateUnitSeg',b.dataset.u)));
-      $('gateBtn').addEventListener('click',()=>doWeight($('gateVal'),$('gateStatus'),'',()=>{ gate.style.display='none'; document.body.style.overflow=''; }));
+      $('gateBtn').addEventListener('click',()=>doWeight($('gateVal'),$('gateStatus'),()=>{ gate.style.display='none'; document.body.style.overflow=''; }));
       $('gateVal').addEventListener('keydown',e=>{ if(e.key==='Enter') $('gateBtn').click(); });
       setTimeout(()=>{ try{ $('gateVal').focus(); }catch{} }, 200);
     })();
@@ -1859,7 +1877,9 @@ main {
   });
   </script>
 
-  <div class="attribution">// editable template · all data stays in your browser</div>
+  <footer class="dash-footer">
+    <a id="trackedHistory" href="https://docs.google.com/spreadsheets" target="_blank" rel="noopener">Tracked History</a>
+  </footer>
 </main>
 
 <!-- Day-left ring (9 AM - midnight); color grows urgent as the day ends -->

@@ -12,8 +12,8 @@
   const TITLE = "Connor's Dashboard";
   const ID_KEY = 'dash_sheet_id';
   const HEADERS = {
-    Meals:  ['Date', 'Meal', 'Scheduled', 'Food', 'Actual', 'Timing', 'Reason'],
-    Weight: ['Date', 'Time', 'Weight', 'Unit', 'Note']
+    Meals:  ['Date', 'Meal Type', 'Ideal Time', 'What Food?', 'What Time?', 'How Late/Early?', 'Reason / Additional Notes'],
+    Weight: ['Date', 'Time', 'Weight (lb)', 'Notes']
   };
 
   function supa() {
@@ -79,8 +79,33 @@
     return createSheet();
   }
 
+  async function getSheetIds(id) {
+    const r = await GoogleAPI.gfetch('https://sheets.googleapis.com/v4/spreadsheets/' + id + '?fields=sheets(properties(sheetId,title))', {});
+    if (!r.ok) throw new Error('getSheetIds failed (' + r.status + ')');
+    const j = await r.json(); const m = {};
+    (j.sheets || []).forEach(s => { m[s.properties.title] = s.properties.sheetId; });
+    return m;
+  }
+  async function batchUpdate(id, requests) {
+    const r = await GoogleAPI.gfetch('https://sheets.googleapis.com/v4/spreadsheets/' + id + ':batchUpdate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requests }) });
+    if (!r.ok) throw new Error('batchUpdate failed (' + r.status + '): ' + (await r.text()));
+    return r.json();
+  }
+  async function updateRange(id, a1, values2d) {
+    const r = await GoogleAPI.gfetch('https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values/' + encodeURIComponent(a1) + '?valueInputOption=USER_ENTERED', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: values2d }) });
+    if (!r.ok) throw new Error('update failed (' + r.status + '): ' + (await r.text()));
+    return r.json();
+  }
+  // Insert rows just under the header (row 1) and fill them; existing rows shift down (newest-first).
+  async function insertRowsTop(id, tab, rows2d) {
+    const ids = await getSheetIds(id); const sid = ids[tab];
+    if (sid == null) throw new Error('tab not found: ' + tab);
+    await batchUpdate(id, [{ insertDimension: { range: { sheetId: sid, dimension: 'ROWS', startIndex: 1, endIndex: 1 + rows2d.length }, inheritFromBefore: false } }]);
+    await updateRange(id, tab + '!A2', rows2d);
+  }
+
   window.Sheets = {
-    ensureSheet, appendRow, readRows, loadId, saveId,
+    ensureSheet, appendRow, readRows, loadId, saveId, insertRowsTop, updateRange,
     link: (id) => 'https://docs.google.com/spreadsheets/d/' + id
   };
 })();
