@@ -1477,7 +1477,7 @@ main {
   <script>
   (function () {
     'use strict';
-    const RESET_HOUR = 6; // goals roll over at 6 AM
+    const RESET_HOUR = 5; // goals roll over at 5 AM
     function sget(k){ try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }
     function sset(k,v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} if (typeof k==='string' && k.indexOf('goals:')===0) window.dispatchEvent(new CustomEvent('goals-changed')); }
     function sdel(k){ try { localStorage.removeItem(k); } catch {} }
@@ -1615,7 +1615,8 @@ main {
     const list = $('mealSlots');
     if (!list) return;
     function ymd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
-    function logKey(){ return 'meals:log:'+ymd(new Date()); }
+    function dayKey(){ const d=new Date(); if(d.getHours()<5) d.setDate(d.getDate()-1); return ymd(d); } // "day" rolls over at 5 AM
+    function logKey(){ return 'meals:log:'+dayKey(); }
     function loadLog(){ try { return JSON.parse(localStorage.getItem(logKey()))||{}; } catch { return {}; } }
     function saveLog(o){ try { localStorage.setItem(logKey(), JSON.stringify(o)); } catch {} }
     function fmt12(h,m){ const ap=h>=12?'PM':'AM'; let hh=h%12; if(hh===0)hh=12; return hh+':'+String(m).padStart(2,'0')+' '+ap; }
@@ -1626,7 +1627,7 @@ main {
     function showSheetLink(id){ const a=document.getElementById('trackedHistory'); if(a&&id){ a.href = window.Sheets ? Sheets.link(id) : ('https://docs.google.com/spreadsheets/d/'+id); } }
 
     function render(){
-      $('mealsDate').textContent = new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
+      $('mealsDate').textContent = new Date(dayKey()+'T12:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
       const log = loadLog(); list.innerHTML='';
       SLOTS.forEach(slot=>{
         const l=log[slot.id]; const card=document.createElement('div');
@@ -1656,11 +1657,11 @@ main {
     // Each day gets a 6-slot block inserted at the top (newest day first), pre-filled
     // with Date / Meal Type / Ideal Time; logging fills in that slot's row.
     async function ensureDayBlock(){
-      const flag='meals:block:'+ymd(new Date());
+      const flag='meals:block:'+dayKey();
       if(localStorage.getItem(flag)) return;
       const id=await Sheets.ensureSheet();
-      try { const rows=await Sheets.readRows(id,'Meals'); if(rows[1] && rows[1][0]===ymd(new Date())){ localStorage.setItem(flag,'1'); return; } } catch(e){}
-      const block = SLOTS.map((s,i)=> [ i===0?ymd(new Date()):'', s.name, fmt12(s.h,s.m), '', '', '', '' ]);
+      try { const rows=await Sheets.readRows(id,'Meals'); if(rows[1] && rows[1][0]===dayKey()){ localStorage.setItem(flag,'1'); return; } } catch(e){}
+      const block = SLOTS.map((s,i)=> [ i===0?dayKey():'', s.name, fmt12(s.h,s.m), '', '', '', '' ]);
       await Sheets.insertRowsTop(id,'Meals', block);
       localStorage.setItem(flag,'1');
     }
@@ -1719,6 +1720,12 @@ main {
   .cal-in { flex:1; min-width:150px; padding:12px; border:1px solid rgba(255,255,255,0.1); border-radius:11px; background:rgba(0,0,0,0.3); color:var(--text-primary); font-size:15px; outline:none; font-family:inherit; }
   .cal-sel, .cal-dur, .cal-when { padding:12px; border:1px solid rgba(255,255,255,0.1); border-radius:11px; background:rgba(0,0,0,0.3); color:var(--text-primary); font-size:14px; font-family:inherit; }
   .cal-add-btn { padding:12px 18px; border:0; border-radius:11px; background:linear-gradient(180deg,#FFF,#E8E5DD); color:#0A0A0B; font-weight:700; font-family:inherit; cursor:pointer; }
+  .cal-end { padding:12px; border:1px solid rgba(255,255,255,0.1); border-radius:11px; background:rgba(0,0,0,0.3); color:var(--text-primary); font-size:14px; font-family:inherit; }
+  .cal-to { align-self:center; color:var(--text-tertiary); font-size:12px; }
+  .cal-add2 { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:8px; }
+  .cal-cal { display:inline-flex; align-items:center; gap:5px; }
+  .cal-mail { font-size:13px; opacity:0.6; }
+  .cal-cal .cal-sel { border:0; background:transparent; color:var(--text-tertiary); font-size:11px; padding:4px 2px; max-width:190px; }
   .day-head { font-size:11px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:var(--text-tertiary); margin:16px 0 8px; }
   .evt { display:flex; gap:12px; align-items:baseline; padding:11px 14px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-left:2px solid #A78BFA; border-radius:10px; margin-bottom:8px; }
   .evt-time { font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); min-width:74px; white-space:nowrap; }
@@ -1734,6 +1741,11 @@ main {
   .dash-footer { text-align:center; margin-top:42px; padding-top:20px; border-top:1px solid rgba(255,255,255,0.06); }
   .dash-footer a { color:var(--text-tertiary); text-decoration:none; font-size:13px; font-weight:600; letter-spacing:0.04em; }
   .dash-footer a:hover { color:var(--text-primary); }
+  .footer-sep { color:var(--text-tertiary); margin:0 8px; opacity:0.5; }
+  .link-sheet-row { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:12px; }
+  .link-sheet-row input { flex:1; min-width:200px; max-width:360px; padding:10px 12px; border:1px solid rgba(255,255,255,0.1); border-radius:10px; background:rgba(0,0,0,0.3); color:var(--text-primary); font-size:13px; outline:none; }
+  .link-sheet-row button { padding:10px 16px; border:0; border-radius:10px; background:linear-gradient(180deg,#FFF,#E8E5DD); color:#0A0A0B; font-weight:700; font-family:inherit; font-size:13px; cursor:pointer; }
+  #linkSheetStatus { text-align:center; font-size:12px; color:var(--text-secondary); min-height:16px; margin-top:8px; }
   </style>
 
   <div class="gm-section">
@@ -1749,8 +1761,11 @@ main {
       <div class="cal-add">
         <input class="cal-in" id="calTitle" type="text" placeholder="Add an event&hellip;" autocomplete="off">
         <input class="cal-when" id="calWhen" type="datetime-local">
-        <select class="cal-dur" id="calDur"><option value="15">15m</option><option value="30">30m</option><option value="60" selected>1h</option><option value="90">1.5h</option><option value="120">2h</option></select>
-        <select class="cal-sel" id="calSel"><option value="primary">Primary</option></select>
+        <span class="cal-to">to</span>
+        <input class="cal-end" id="calEnd" type="time">
+      </div>
+      <div class="cal-add2">
+        <label class="cal-cal" title="Which calendar"><span class="cal-mail">✉</span><select class="cal-sel" id="calSel"><option value="primary">primary</option></select></label>
         <button class="cal-add-btn" id="calAddBtn" type="button">+ Add</button>
       </div>
       <div id="calStatus" style="text-align:center;font-size:12px;color:var(--text-secondary);min-height:16px;margin-top:8px"></div>
@@ -1777,6 +1792,7 @@ main {
     function ymd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
     function escapeHtml(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
     function time12(){ return new Date().toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); }
+    function dayKey(){ const d=new Date(); if(d.getHours()<5) d.setDate(d.getDate()-1); return ymd(d); } // the "day" rolls over at 5 AM
 
     // ---------- WEIGHT (lb only; logged once each morning; history kept locally) ----------
     function loadWLog(){ try { return JSON.parse(localStorage.getItem('weight:log'))||[]; } catch { return []; } }
@@ -1798,15 +1814,15 @@ main {
     async function doWeight(valEl, statusEl, onDone){
       const v=parseFloat(valEl.value); if(!(v>0)){ valEl.focus(); return; }
       statusEl.textContent='Saving…';
-      try { localStorage.setItem('weight:lastdate', ymd(new Date())); } catch {}
+      try { localStorage.setItem('weight:lastdate', dayKey()); } catch {}
       const log=loadWLog(); const prev=log.length?log[log.length-1]:null;
-      log.push({ d:ymd(new Date()), t:time12(), lb:v, note:'' }); saveWLog(log); // local first (offline-safe)
+      log.push({ d:dayKey(), t:time12(), lb:v, note:'' }); saveWLog(log); // local first (offline-safe)
       renderHistory();
       try {
         const id=await Sheets.ensureSheet();
         let cell=String(v);
         if(prev){ const d=Math.round((v-prev.lb)*10)/10; if(d<0) cell=v+' ▼ '+Math.abs(d); else if(d>0) cell=v+' ▲ '+d; }
-        await Sheets.insertRowsTop(id,'Weight', [[ ymd(new Date()), time12(), cell, '' ]]);
+        await Sheets.insertRowsTop(id,'Weight', [[ dayKey(), time12(), cell, '' ]]);
         setFooter(id); statusEl.textContent='Saved ✓'; if(onDone)onDone(); }
       catch(e){ statusEl.textContent=/PERMISSION_DENIED|403|scope|not connected|not defined/i.test((e&&e.message)||'')?'Logged locally. Reconnect Fitbit to sync.':'Logged locally.'; if(onDone)onDone(); }
     }
@@ -1817,7 +1833,7 @@ main {
     // ---------- DAILY WEIGHT GATE (the only way to log weight) ----------
     (function(){
       let last=''; try{ last=localStorage.getItem('weight:lastdate')||''; }catch{}
-      if(last===ymd(new Date())) return;
+      if(last===dayKey()) return;
       const gate=$('weightGate'); gate.style.display='flex'; document.body.style.overflow='hidden';
       $('gateBtn').addEventListener('click',()=>doWeight($('gateVal'),$('gateStatus'),()=>{ gate.style.display='none'; document.body.style.overflow=''; }));
       $('gateVal').addEventListener('keydown',e=>{ if(e.key==='Enter') $('gateBtn').click(); });
@@ -1836,7 +1852,7 @@ main {
         if(!r.ok) return; const j=await r.json(); const items=(j.items||[]); if(!items.length) return;
         items.sort((a,b)=>(b.primary?1:0)-(a.primary?1:0));
         const sel=$('calSel'); sel.innerHTML='';
-        items.forEach(c=>{ const o=document.createElement('option'); o.value=c.id; o.textContent=(c.summary||c.id)+(c.primary?' (primary)':''); sel.appendChild(o); });
+        items.forEach(c=>{ const o=document.createElement('option'); o.value=c.id; o.textContent=(c.summary||c.id); sel.appendChild(o); });
       } catch(e){ /* keep default Primary */ }
     }
     function renderEvents(items){
@@ -1860,7 +1876,10 @@ main {
     async function addEvent(){
       const title=($('calTitle').value||'').trim(); const whenVal=$('calWhen').value;
       if(!title){ $('calTitle').focus(); return; } if(!whenVal){ $('calWhen').focus(); return; }
-      const start=new Date(whenVal); const dur=parseInt($('calDur').value,10)||60; const end=new Date(start.getTime()+dur*60000);
+      const start=new Date(whenVal);
+      const endStr=$('calEnd').value; let end;
+      if(endStr){ const ep=endStr.split(':'); end=new Date(start); end.setHours(+ep[0], +ep[1], 0, 0); if(end<=start) end.setDate(end.getDate()+1); }
+      else { end=new Date(start.getTime()+3600000); }
       const calId=$('calSel').value||'primary'; const btn=$('calAddBtn'); btn.disabled=true;
       try {
         $('calStatus').textContent='Adding…';
@@ -1870,15 +1889,42 @@ main {
       } catch(e){ $('calStatus').textContent='Error: '+e.message; } finally { btn.disabled=false; }
     }
     const def=new Date(); def.setHours(def.getHours()+1,0,0,0); $('calWhen').value=localInput(def);
+    const defEnd=new Date(def.getTime()+3600000); $('calEnd').value=pad(defEnd.getHours())+':'+pad(defEnd.getMinutes());
     $('calAddBtn').addEventListener('click',addEvent);
     $('calTitle').addEventListener('keydown',e=>{ if(e.key==='Enter') addEvent(); });
     if(window.GoogleAPI && GoogleAPI.isConnected()){ loadCalendars(); loadEvents(); }
     else { $('calEvents').innerHTML='<div class="cal-empty">Connect Fitbit above to see your calendar.</div>'; }
+
+    // ---------- LINK A DIFFERENT SHEET (e.g. the one you created by hand) ----------
+    (function(){
+      const tog=$('linkSheetToggle'), row=$('linkSheetRow'), inp=$('linkSheetUrl'), btn=$('linkSheetBtn'), st=$('linkSheetStatus');
+      if(!tog||!btn) return;
+      tog.addEventListener('click',()=>{ row.style.display = (row.style.display==='none'||!row.style.display)?'flex':'none'; if(row.style.display==='flex') inp.focus(); });
+      btn.addEventListener('click', async ()=>{
+        const v=(inp.value||'').trim(); const m=v.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/); const id=m?m[1]:(/^[a-zA-Z0-9_-]{20,}$/.test(v)?v:null);
+        if(!id){ st.textContent='That doesn’t look like a Google Sheet URL.'; return; }
+        st.textContent='Linking…';
+        try {
+          await Sheets.useSheet(id);
+          try { for(let i=localStorage.length-1;i>=0;i--){ const k=localStorage.key(i); if(k&&k.indexOf('meals:block:')===0) localStorage.removeItem(k); } } catch{}
+          if(typeof setFooter==='function') setFooter(id);
+          st.textContent='Linked ✓ — the app now uses this sheet.'; row.style.display='none'; inp.value='';
+          setTimeout(()=>{ st.textContent=''; }, 3000);
+        } catch(e){ st.textContent='Failed: '+((e&&e.message)||e); }
+      });
+    })();
   });
   </script>
 
   <footer class="dash-footer">
     <a id="trackedHistory" href="https://docs.google.com/spreadsheets" target="_blank" rel="noopener">Tracked History</a>
+    <span class="footer-sep">·</span>
+    <a id="linkSheetToggle" href="javascript:void(0)">link a sheet</a>
+    <div class="link-sheet-row" id="linkSheetRow" style="display:none">
+      <input id="linkSheetUrl" type="text" placeholder="Paste your Google Sheet URL" autocomplete="off">
+      <button id="linkSheetBtn" type="button">Use this sheet</button>
+    </div>
+    <div id="linkSheetStatus"></div>
   </footer>
 </main>
 

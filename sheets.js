@@ -104,8 +104,20 @@
     await updateRange(id, tab + '!A2', rows2d);
   }
 
+  // Make sure the spreadsheet has the Meals + Weight tabs (create with headers if missing).
+  async function ensureTabs(id) {
+    try {
+      const ids = await getSheetIds(id);
+      for (const t of ['Meals', 'Weight']) {
+        if (ids[t] == null) { await batchUpdate(id, [{ addSheet: { properties: { title: t } } }]); await appendRow(id, t, HEADERS[t]); }
+      }
+    } catch (e) {}
+  }
+  // Point the app at a specific spreadsheet (e.g. one the user created by hand).
+  async function useSheet(id) { await saveId(id); await ensureTabs(id); return id; }
+
   window.Sheets = {
-    ensureSheet, appendRow, readRows, loadId, saveId, insertRowsTop, updateRange,
+    ensureSheet, appendRow, readRows, loadId, saveId, insertRowsTop, updateRange, useSheet,
     link: (id) => 'https://docs.google.com/spreadsheets/d/' + id
   };
 })();
