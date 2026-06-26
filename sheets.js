@@ -55,6 +55,21 @@
     return j.values || [];
   }
 
+  function hexToRgb(hex) { hex = hex.replace('#', ''); return { red: parseInt(hex.slice(0, 2), 16) / 255, green: parseInt(hex.slice(2, 4), 16) / 255, blue: parseInt(hex.slice(4, 6), 16) / 255 }; }
+  // Connor's sheet palette — applied only to a tab the APP creates (the fallback), so
+  // it matches his hand-styled sheet: frozen header, alternating row bands, border color.
+  async function applyTabFormat(id, tab) {
+    const ids = await getSheetIds(id); const sid = ids[tab]; if (sid == null) return;
+    const cols = (tab === 'Meals') ? 7 : 4;
+    const band1 = hexToRgb('#211b14'), band2 = hexToRgb('#2a2219'), border = hexToRgb('#3a3228');
+    const range = { sheetId: sid, startRowIndex: 0, endRowIndex: 1000, startColumnIndex: 0, endColumnIndex: cols };
+    const b = { style: 'SOLID', color: border };
+    await batchUpdate(id, [
+      { updateSheetProperties: { properties: { sheetId: sid, gridProperties: { frozenRowCount: 1 } }, fields: 'gridProperties.frozenRowCount' } },
+      { addBanding: { bandedRange: { range: range, rowProperties: { headerColor: border, firstBandColor: band1, secondBandColor: band2 } } } },
+      { updateBorders: { range: range, top: b, bottom: b, left: b, right: b, innerHorizontal: b, innerVertical: b } }
+    ]);
+  }
   async function createSheet() {
     const body = { properties: { title: TITLE }, sheets: [{ properties: { title: 'Meals' } }, { properties: { title: 'Weight' } }] };
     const r = await GoogleAPI.gfetch('https://sheets.googleapis.com/v4/spreadsheets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -63,6 +78,7 @@
     const id = j.spreadsheetId;
     await appendRow(id, 'Meals', HEADERS.Meals);
     await appendRow(id, 'Weight', HEADERS.Weight);
+    try { await applyTabFormat(id, 'Meals'); await applyTabFormat(id, 'Weight'); } catch (e) {}
     await saveId(id);
     return id;
   }
@@ -109,7 +125,7 @@
     try {
       const ids = await getSheetIds(id);
       for (const t of ['Meals', 'Weight']) {
-        if (ids[t] == null) { await batchUpdate(id, [{ addSheet: { properties: { title: t } } }]); await appendRow(id, t, HEADERS[t]); }
+        if (ids[t] == null) { await batchUpdate(id, [{ addSheet: { properties: { title: t } } }]); await appendRow(id, t, HEADERS[t]); try { await applyTabFormat(id, t); } catch (e) {} }
       }
     } catch (e) {}
   }

@@ -1091,7 +1091,11 @@ main {
         throw new Error(type + ' ' + r.status + ': ' + body);
       }
       if (DEBUG) console.log('[fitbit] ' + type, json);
-      return (json && json.dataPoints) || [];
+      const dps = (json && json.dataPoints) || [];
+      // A filter that silently excludes everything looks identical to "no data" —
+      // if we got nothing WITH a filter, retry once unfiltered before giving up.
+      if (filter && dps.length === 0) { if (DEBUG) console.warn('[fitbit] ' + type + ' empty with filter — retrying unfiltered'); return gFetch(type, null, t, pageSize); }
+      return dps;
     }
 
     // ---- generic, schema-tolerant extractors ----
@@ -1282,14 +1286,16 @@ main {
       showErr('');
       try {
         const days = (n) => new Date(Date.now() - n * 864e5).toISOString();
+        const errors = [];
+        const grab = (type, filter, ps) => gFetch(type, filter, t, ps).catch(e => { errors.push(e.message || String(e)); console.error('[fitbit] ' + type, e.message); return []; });
         const [hrvDps, rhrDps, spo2Dps, respDps, tempDps, stepsDps, sleepDps] = await Promise.all([
-          gFetch('heart-rate-variability',            'heart_rate_variability.interval.start_time >= "' + days(30) + '"', t, 200).catch(e => { console.error('[fitbit] hrv', e.message); return []; }),
-          gFetch('daily-resting-heart-rate',          'daily_resting_heart_rate.interval.start_time >= "' + days(30) + '"', t, 200).catch(e => { console.error('[fitbit] rhr', e.message); return []; }),
-          gFetch('oxygen-saturation',                 'oxygen_saturation.interval.start_time >= "' + days(2) + '"', t, 200).catch(e => { console.error('[fitbit] spo2', e.message); return []; }),
-          gFetch('daily-respiratory-rate',            'daily_respiratory_rate.interval.start_time >= "' + days(3) + '"', t, 50).catch(e => { console.error('[fitbit] resp', e.message); return []; }),
-          gFetch('daily-sleep-temperature-derivations','daily_sleep_temperature_derivations.interval.start_time >= "' + days(7) + '"', t, 50).catch(e => { console.error('[fitbit] temp', e.message); return []; }),
-          gFetch('steps',                             'steps.interval.start_time >= "' + days(1) + '"', t, 500).catch(e => { console.error('[fitbit] steps', e.message); return []; }),
-          gFetch('sleep',                             'sleep.interval.end_time >= "' + days(2) + '"', t, 200).catch(e => { console.error('[fitbit] sleep', e.message); return []; })
+          grab('heart-rate-variability',            'heart_rate_variability.interval.start_time >= "' + days(30) + '"', 200),
+          grab('daily-resting-heart-rate',          'daily_resting_heart_rate.interval.start_time >= "' + days(30) + '"', 200),
+          grab('oxygen-saturation',                 'oxygen_saturation.interval.start_time >= "' + days(2) + '"', 200),
+          grab('daily-respiratory-rate',            'daily_respiratory_rate.interval.start_time >= "' + days(3) + '"', 50),
+          grab('daily-sleep-temperature-derivations','daily_sleep_temperature_derivations.interval.start_time >= "' + days(7) + '"', 50),
+          grab('steps',                             'steps.interval.start_time >= "' + days(1) + '"', 500),
+          grab('sleep',                             'sleep.interval.end_time >= "' + days(2) + '"', 200)
         ]);
 
         const hrvS = dailyMedians(hrvDps, /rootMeanSquare|rmssd/i);
@@ -1326,11 +1332,23 @@ main {
 
         const fresh = { hrv, rhr, spo2, resp, skin, steps, sleepHours, readiness: rec, stages: (stg && stg.total > 0) ? stg : null };
         const gotData = (hrv != null || rhr != null || spo2 != null || steps != null || sleepHours != null || rec != null);
-        if (gotData) { paint(fresh, Date.now()); saveSnap(fresh); }
-        else { const snap = loadSnap(); if (snap) paint(snap, snap.ts); else paint(fresh, Date.now()); }
+        if (gotData) { showErr(''); paint(fresh, Date.now()); saveSnap(fresh); }
+        else {
+          const snap = loadSnap();
+          if (snap) { paint(snap, snap.ts); showErr('Couldn’t refresh — showing your last reading.'); }
+          else if (errors.length) {
+            const e0 = errors[0] || '';
+            showErr(/401|403|unauthor|insufficient|scope|PERMISSION/i.test(e0)
+              ? 'Fitbit access expired — tap Disconnect, then Connect Fitbit to re-grant access.'
+              : ('Couldn’t load Fitbit data: ' + e0));
+          } else {
+            paint(fresh, Date.now()); // genuinely connected but no data yet → "building baseline"
+          }
+        }
       } catch (e) {
         const snap = loadSnap();
-        if (snap) paint(snap, snap.ts); else showErr(e.message || String(e));
+        if (snap) { paint(snap, snap.ts); showErr('Couldn’t refresh — showing your last reading.'); }
+        else showErr(e.message || String(e));
       }
     }
 
@@ -1897,8 +1915,11 @@ main {
 
     // ---------- LINK A DIFFERENT SHEET (e.g. the one you created by hand) ----------
     (function(){
-      const tog=$('linkSheetToggle'), row=$('linkSheetRow'), inp=$('linkSheetUrl'), btn=$('linkSheetBtn'), st=$('linkSheetStatus');
+      const tog=$('linkSheetToggle'), row=$('linkSheetRow'), inp=$('linkSheetUrl'), btn=$('linkSheetBtn'), st=$('linkSheetStatus'), sep=document.querySelector('.footer-sep');
       if(!tog||!btn) return;
+      function hideControl(){ tog.style.display='none'; if(sep) sep.style.display='none'; row.style.display='none'; }
+      // Already linked a sheet? then this control isn't needed anymore.
+      if(window.Sheets) Sheets.loadId().then(id=>{ if(id) hideControl(); }).catch(()=>{});
       tog.addEventListener('click',()=>{ row.style.display = (row.style.display==='none'||!row.style.display)?'flex':'none'; if(row.style.display==='flex') inp.focus(); });
       btn.addEventListener('click', async ()=>{
         const v=(inp.value||'').trim(); const m=v.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/); const id=m?m[1]:(/^[a-zA-Z0-9_-]{20,}$/.test(v)?v:null);
@@ -1908,7 +1929,7 @@ main {
           await Sheets.useSheet(id);
           try { for(let i=localStorage.length-1;i>=0;i--){ const k=localStorage.key(i); if(k&&k.indexOf('meals:block:')===0) localStorage.removeItem(k); } } catch{}
           if(typeof setFooter==='function') setFooter(id);
-          st.textContent='Linked ✓ — the app now uses this sheet.'; row.style.display='none'; inp.value='';
+          st.textContent='Linked ✓ — the app now uses this sheet.'; inp.value=''; hideControl();
           setTimeout(()=>{ st.textContent=''; }, 3000);
         } catch(e){ st.textContent='Failed: '+((e&&e.message)||e); }
       });
