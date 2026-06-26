@@ -7,7 +7,7 @@
 // =============================================================
 (function () {
   'use strict';
-  const KEY = 'fitbit_tokens_v1';
+  const KEY = 'google_tokens_v1'; // Sheets + Calendar token — SEPARATE from the Health token (fitbit_tokens_v1)
   function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } }
   function save(t) { try { localStorage.setItem(KEY, JSON.stringify(t)); } catch {} }
 

@@ -1016,13 +1016,13 @@ main {
     const REDIRECT  = window.location.origin + '/api/google-callback';
     // Restricted Google Health scopes — these must ALSO be added on the
     // OAuth consent screen's "Data Access" page in the Google Cloud console.
+    // Health token carries ONLY Health scopes — the Health API 403s ("disallowed OAuth
+    // scope(s)") any token that also holds Sheets/Calendar scopes. Those live in a
+    // SEPARATE Google token (see "Connect Google" in the footer + google-api.js).
     const SCOPES = [
       'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
       'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
-      'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly',
-      'https://www.googleapis.com/auth/spreadsheets',
-      'https://www.googleapis.com/auth/calendar.events',
-      'https://www.googleapis.com/auth/calendar.calendarlist.readonly'
+      'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly'
     ].join(' ');
     const DEBUG = true; // logs raw Google Health responses to the browser console
     const DEBUG_PANEL = /fbdebug/i.test(location.hash) || /fbdebug/i.test(location.search); // on-screen raw dump for tuning
@@ -1040,25 +1040,25 @@ main {
       const h = new URLSearchParams(location.hash.slice(1));
       const access = h.get('g_access'), refresh = h.get('g_refresh');
       const expires = Number(h.get('g_expires')) || Date.now() + 3500e3;
-      if (access) { save({ access, refresh, expires }); history.replaceState(null, '', location.pathname + location.search); }
+      const bucket = (h.get('g_state') === 'g') ? 'google_tokens_v1' : KEY; // 'g' = the Sheets/Calendar token
+      if (access) { try { localStorage.setItem(bucket, JSON.stringify({ access, refresh, expires })); } catch {} history.replaceState(null, '', location.pathname + location.search); }
     }
 
-    $('fbConnectBtn').addEventListener('click', () => {
-      if (CLIENT_ID === 'YOUR_GOOGLE_OAUTH_CLIENT_ID') {
-        alert('Add your Google OAuth Client ID in health.html (CLIENT_ID) before connecting.');
-        return;
-      }
-      const url = 'https://accounts.google.com/o/oauth2/v2/auth'
+    // Shared connect helper — used by BOTH the Fitbit (health) and Google (sheets/calendar)
+    // buttons. include_granted_scopes=false keeps each token to only its own scopes.
+    window.dashConnect = function (scopes, state) {
+      if (CLIENT_ID === 'YOUR_GOOGLE_OAUTH_CLIENT_ID') { alert('Add your Google OAuth Client ID in health.html (CLIENT_ID) before connecting.'); return; }
+      location.href = 'https://accounts.google.com/o/oauth2/v2/auth'
         + '?client_id='     + encodeURIComponent(CLIENT_ID)
         + '&redirect_uri='  + encodeURIComponent(REDIRECT)
         + '&response_type=code'
-        + '&scope='         + encodeURIComponent(SCOPES)
+        + '&scope='         + encodeURIComponent(scopes)
         + '&access_type=offline'
         + '&prompt=consent'
         + '&include_granted_scopes=false'
-        + '&state='         + Math.random().toString(36).slice(2);
-      location.href = url;
-    });
+        + '&state='         + encodeURIComponent(state || 'fb');
+    };
+    $('fbConnectBtn').addEventListener('click', () => dashConnect(SCOPES, 'fb'));
     $('fbDisconnectBtn').addEventListener('click', () => { wipe(); render(); });
     $('fbRefresh').addEventListener('click', async (e) => {
       const btn = e.currentTarget; btn.classList.add('spin');
@@ -1692,7 +1692,7 @@ main {
       await Sheets.updateRange(id, 'Meals!D'+row+':G'+row, [[food, time, late, reason||'']]);
       showSheetLink(id);
     }
-    function scopeMsg(e){ const m=(e&&e.message)||String(e); return /PERMISSION_DENIED|403|insufficient|scope|not connected|not defined/i.test(m) ? 'Logged here. Connect/reconnect Fitbit above to sync meals to Google Sheets.' : ('Logged here, sheet sync failed: '+m); }
+    function scopeMsg(e){ const m=(e&&e.message)||String(e); return /PERMISSION_DENIED|403|insufficient|scope|not connected|not defined/i.test(m) ? 'Logged here. Connect Google (in the footer) to sync meals to Sheets.' : ('Logged here, sheet sync failed: '+m); }
 
     async function save(id){
       const slot=SLOTS.find(s=>s.id===id); const fi=$('food-'+id), ti=$('time-'+id), ri=$('reason-'+id);
@@ -1843,7 +1843,7 @@ main {
         if(prev){ const d=Math.round((v-prev.lb)*10)/10; if(d<0) cell=v+' ▼ '+Math.abs(d); else if(d>0) cell=v+' ▲ '+d; }
         await Sheets.insertRowsTop(id,'Weight', [[ dayKey(), time12(), cell, '' ]]);
         setFooter(id); statusEl.textContent='Saved ✓'; if(onDone)onDone(); }
-      catch(e){ statusEl.textContent=/PERMISSION_DENIED|403|scope|not connected|not defined/i.test((e&&e.message)||'')?'Logged locally. Reconnect Fitbit to sync.':'Logged locally.'; if(onDone)onDone(); }
+      catch(e){ statusEl.textContent=/PERMISSION_DENIED|403|scope|not connected|not defined/i.test((e&&e.message)||'')?'Logged locally. Connect Google (footer) to sync.':'Logged locally.'; if(onDone)onDone(); }
     }
 
     renderHistory();
@@ -1888,9 +1888,9 @@ main {
       try {
         const timeMin=new Date().toISOString(), timeMax=new Date(Date.now()+14*864e5).toISOString();
         const r=await GoogleAPI.gfetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=40&timeMin='+encodeURIComponent(timeMin)+'&timeMax='+encodeURIComponent(timeMax),{});
-        if(!r.ok){ box.innerHTML='<div class="cal-empty">'+(r.status===403?'Reconnect above to grant Calendar access.':'Could not load events ('+r.status+').')+'</div>'; return; }
+        if(!r.ok){ box.innerHTML='<div class="cal-empty">'+(r.status===403?'Connect Google (footer) to grant Calendar access.':'Could not load events ('+r.status+').')+'</div>'; return; }
         const j=await r.json(); renderEvents(j.items||[]);
-      } catch(e){ box.innerHTML='<div class="cal-empty">'+(e.message==='not connected'?'Connect Fitbit above to see your calendar.':'Error: '+e.message)+'</div>'; }
+      } catch(e){ box.innerHTML='<div class="cal-empty">'+(e.message==='not connected'?'Connect Google (in the footer) to see your calendar.':'Error: '+e.message)+'</div>'; }
     }
     async function addEvent(){
       const title=($('calTitle').value||'').trim(); const whenVal=$('calWhen').value;
@@ -1903,7 +1903,7 @@ main {
       try {
         $('calStatus').textContent='Adding…';
         const r=await GoogleAPI.gfetch(calUrl(calId),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({summary:title,start:{dateTime:start.toISOString(),timeZone:TZ},end:{dateTime:end.toISOString(),timeZone:TZ}})});
-        if(!r.ok){ $('calStatus').textContent=r.status===403?'Reconnect above to grant Calendar access.':'Add failed ('+r.status+').'; return; }
+        if(!r.ok){ $('calStatus').textContent=r.status===403?'Connect Google (footer) to grant Calendar access.':'Add failed ('+r.status+').'; return; }
         $('calStatus').textContent='Added ✓'; $('calTitle').value=''; loadEvents(); setTimeout(()=>{$('calStatus').textContent='';},1500);
       } catch(e){ $('calStatus').textContent='Error: '+e.message; } finally { btn.disabled=false; }
     }
@@ -1912,11 +1912,22 @@ main {
     $('calAddBtn').addEventListener('click',addEvent);
     $('calTitle').addEventListener('keydown',e=>{ if(e.key==='Enter') addEvent(); });
     if(window.GoogleAPI && GoogleAPI.isConnected()){ loadCalendars(); loadEvents(); }
-    else { $('calEvents').innerHTML='<div class="cal-empty">Connect Fitbit above to see your calendar.</div>'; }
+    else { $('calEvents').innerHTML='<div class="cal-empty">Connect Google (in the footer) to see your calendar.</div>'; }
+
+    // ----- Connect Google (Sheets + Calendar) — a SEPARATE login/token from Fitbit/Health -----
+    (function(){
+      const cg=$('connectGoogleBtn'), sep=$('cgSep');
+      if(!cg) return;
+      if(!(window.GoogleAPI && GoogleAPI.isConnected())){ cg.style.display='inline'; if(sep) sep.style.display='inline'; }
+      cg.addEventListener('click', ()=>{
+        const scopes=['https://www.googleapis.com/auth/spreadsheets','https://www.googleapis.com/auth/calendar.events','https://www.googleapis.com/auth/calendar.calendarlist.readonly'].join(' ');
+        if(window.dashConnect) dashConnect(scopes,'g'); else alert('Reload the page and try again.');
+      });
+    })();
 
     // ---------- LINK A DIFFERENT SHEET (e.g. the one you created by hand) ----------
     (function(){
-      const tog=$('linkSheetToggle'), row=$('linkSheetRow'), inp=$('linkSheetUrl'), btn=$('linkSheetBtn'), st=$('linkSheetStatus'), sep=document.querySelector('.footer-sep');
+      const tog=$('linkSheetToggle'), row=$('linkSheetRow'), inp=$('linkSheetUrl'), btn=$('linkSheetBtn'), st=$('linkSheetStatus'), sep=$('lsSep');
       if(!tog||!btn) return;
       function hideControl(){ tog.style.display='none'; if(sep) sep.style.display='none'; row.style.display='none'; }
       // Already linked a sheet? then this control isn't needed anymore.
@@ -1939,8 +1950,10 @@ main {
   </script>
 
   <footer class="dash-footer">
+    <a id="connectGoogleBtn" href="javascript:void(0)" style="display:none">Connect Google (Sheets &amp; Calendar)</a>
+    <span class="footer-sep" id="cgSep" style="display:none">·</span>
     <a id="trackedHistory" href="https://docs.google.com/spreadsheets" target="_blank" rel="noopener">Tracked History</a>
-    <span class="footer-sep">·</span>
+    <span class="footer-sep" id="lsSep">·</span>
     <a id="linkSheetToggle" href="javascript:void(0)">link a sheet</a>
     <div class="link-sheet-row" id="linkSheetRow" style="display:none">
       <input id="linkSheetUrl" type="text" placeholder="Paste your Google Sheet URL" autocomplete="off">
