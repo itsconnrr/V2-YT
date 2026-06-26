@@ -1689,7 +1689,10 @@ main {
       const id=await Sheets.ensureSheet();
       await ensureDayBlock();                 // today's block sits at rows 2..7
       const row=2+i;
-      await Sheets.updateRange(id, 'Meals!D'+row+':G'+row, [[food, time, late, reason||'']]);
+      // Sheets reads a leading + - = @ as a formula and shows #ERROR! — a leading
+      // apostrophe is its "plain text" marker (invisible in the cell), so e.g. "+15m late" stays text.
+      const txt = (s) => { s = (s == null ? '' : String(s)); return /^[=+\-@]/.test(s) ? "'" + s : s; };
+      await Sheets.updateRange(id, 'Meals!D'+row+':G'+row, [[txt(food), time, txt(late), txt(reason||'')]]);
       showSheetLink(id);
     }
     function scopeMsg(e){ const m=(e&&e.message)||String(e); return /PERMISSION_DENIED|403|insufficient|scope|not connected|not defined/i.test(m) ? 'Logged here. Connect Google (in the footer) to sync meals to Sheets.' : ('Logged here, sheet sync failed: '+m); }
