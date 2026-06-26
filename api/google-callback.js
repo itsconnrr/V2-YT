@@ -62,10 +62,12 @@ export default async function handler(req, res) {
     // refresh_token is only returned on the first consent (or when
     // prompt=consent is sent). The frontend forces prompt=consent so
     // we reliably get one.
+    const state = (req.query && req.query.state) || '';
     const hash = new URLSearchParams({
       g_access:  access,
       g_refresh: refresh,
       g_expires: String(Date.now() + expiresIn * 1000),
+      g_state:   state,
     }).toString();
     res.writeHead(302, { Location: '/health.html#' + hash });
     res.end();
