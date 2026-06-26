@@ -1323,6 +1323,7 @@ main {
           const dbg = $('fbDebug'); dbg.style.display = '';
           dbg.textContent = JSON.stringify({
             counts: { hrv: hrvDps.length, rhr: rhrDps.length, spo2: spo2Dps.length, resp: respDps.length, temp: tempDps.length, steps: stepsDps.length, sleep: sleepDps.length },
+            errors: errors,
             parsed: { hrv, rhr, spo2, resp, skin, steps, sleepHours },
             diag: { hrvDays: hrvS.length, rhrDays: rhrS.length, spo2_valid: spo2Vals.length, steps_fitbit_pts: fitbitSteps.length, today: todayYMD },
             hrv_sample: sample(hrvDps), rhr_sample: sample(rhrDps), spo2_sample: sample(spo2Dps),
